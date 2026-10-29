@@ -5,6 +5,7 @@ const BODY := Color("#8ebf55")
 const BODY_DARK := Color("#5f8f3c")
 const CREAM := Color("#f4e9d2")
 const HOVER := Color("#e1ecd4")
+const TONGUE := Color("#cf7067")
 const SHADOW := Color(0.05, 0.10, 0.07, 0.16)
 
 static func create_popup_theme() -> Theme:

@@ -1,11 +1,25 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=6 format=3]
 
-[ext_resource path="res://scripts/Main.gd" type="Script" id="1_main"]
-[ext_resource path="res://scripts/FrogVisual.gd" type="Script" id="2_frog"]
+[ext_resource type="Script" path="res://scripts/app/Main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/entities/FrogVisual.gd" id="2_frog"]
+[ext_resource type="Script" path="res://scripts/entities/PetSwarm.gd" id="3_swarm"]
+[ext_resource type="Shader" path="res://shaders/idle_pixelate.gdshader" id="4_pixel_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_pixel"]
+shader = ExtResource("4_pixel_shader")
+shader_parameter/pixel_size = 1.0
 
 [node name="CrazyNaiwa" type="Node2D"]
 script = ExtResource("1_main")
 
-[node name="Frog" type="Node2D" parent="."]
+[node name="FrogEffects" type="CanvasGroup" parent="."]
+material = SubResource("ShaderMaterial_pixel")
+fit_margin = 150.0
+clear_margin = 150.0
+
+[node name="Frog" type="Node2D" parent="FrogEffects"]
 position = Vector2(160, 172)
 script = ExtResource("2_frog")
+
+[node name="PetSwarm" type="Node2D" parent="."]
+script = ExtResource("3_swarm")

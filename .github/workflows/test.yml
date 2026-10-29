@@ -23,4 +23,4 @@ jobs:
       - name: Smoke-test main scene
         run: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --quit-after 2
       - name: Run automated tests
-        run: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/test_settings.gd
+        run: /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/test_pet_system.gd

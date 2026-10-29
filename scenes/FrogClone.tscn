@@ -1,0 +1,19 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/entities/FrogVisual.gd" id="1_visual"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 13.0
+
+[node name="FrogClone" type="RigidBody2D"]
+mass = 0.55
+linear_damp = 2.0
+angular_damp = 2.5
+continuous_cd = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="Visual" type="Node2D" parent="."]
+scale = Vector2(0.2, 0.2)
+script = ExtResource("1_visual")

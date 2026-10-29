@@ -8,13 +8,11 @@ const PET_WINDOW_SIZE := Vector2i(320, 320)
 var behavior := PetBehavior.new()
 var frog: Node2D
 var swarm: Node2D
-var effects: CanvasGroup
 var menu: PopupMenu
 var pointer_held := false
-var pointer_was_on_pet := false
 var dragging := false
-var drag_screen_origin := Vector2.ZERO
-var drag_window_origin := Vector2.ZERO
+var drag_screen_origin := Vector2i.ZERO
+var drag_offset := Vector2i.ZERO
 
 func _ready() -> void:
 	Engine.max_fps = 30
@@ -23,58 +21,45 @@ func _ready() -> void:
 	pet_window.borderless = true
 	pet_window.always_on_top = PetSettings.always_on_top
 	pet_window.size = PET_WINDOW_SIZE
-	frog = $FrogEffects/Frog
+	frog = $Frog
 	swarm = $PetSwarm
-	effects = $FrogEffects
 	_restore_window_position()
 	behavior.set_enabled(PetSettings.antics_enabled)
-	behavior.tongue_enabled = true
 	behavior.initialize(Vector2(pet_window.position))
 	swarm.set_simulation_enabled(PetSettings.antics_enabled)
-	frog.set_pointer_position(get_viewport().get_mouse_position())
 	_build_menu()
 	_apply_behavior_visuals()
-	_apply_pixelation()
 	_update_mouse_region()
 	swarm.activity_finished.connect(_on_swarm_activity_finished)
 
 func _process(delta: float) -> void:
 	var pointer_position := get_viewport().get_mouse_position()
 	frog.set_pointer_position(pointer_position)
-	_update_pointer_activity(pointer_position, false)
 	var work_area := DesktopBounds.current_work_area()
 	if not pointer_held:
 		var events := behavior.advance(delta, work_area, PET_WINDOW_SIZE)
 		if events.corner_hit:
 			frog.play_blink()
-		if events.tongue_started:
-			frog.play_blink()
 		if events.landed:
 			frog.play_impact()
 		_set_window_position(behavior.window_position)
 	_apply_behavior_visuals()
-	_apply_pixelation()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		frog.set_pointer_position(event.position)
-		_update_pointer_activity(event.position, not event.relative.is_zero_approx())
 		if swarm.visible and not event.relative.is_zero_approx():
 			swarm.kick_near(event.position, event.relative * 2.4)
 		if pointer_held:
-			var screen_mouse := Vector2(DisplayServer.mouse_get_position())
-			var movement := screen_mouse - drag_screen_origin
+			var screen_mouse := DisplayServer.mouse_get_position()
+			var movement := Vector2(screen_mouse - drag_screen_origin)
 			if not dragging and movement.length() >= 5.0:
 				dragging = true
 			if dragging:
-				behavior.move_drag(drag_window_origin + movement, screen_mouse)
-				_set_window_position(behavior.window_position)
+				var next_window_position := screen_mouse - drag_offset
+				behavior.move_drag(Vector2(next_window_position), Vector2(screen_mouse))
+				get_window().position = next_window_position
 				_apply_behavior_visuals()
 				get_viewport().set_input_as_handled()
-		elif behavior.tongue_seconds > 0.0:
-			if behavior.add_tongue_wiggle(event.relative.length()):
-				frog.play_blink()
-			_apply_behavior_visuals()
 	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			menu.position = DisplayServer.mouse_get_position()
@@ -84,17 +69,17 @@ func _input(event: InputEvent) -> void:
 			if event.pressed and frog.is_point_on_pet(event.position):
 				pointer_held = true
 				dragging = false
-				drag_screen_origin = Vector2(DisplayServer.mouse_get_position())
-				drag_window_origin = Vector2(get_window().position)
-				behavior.begin_drag(drag_screen_origin)
-				frog.set_held(true)
+				drag_screen_origin = DisplayServer.mouse_get_position()
+				var window_position := get_window().position
+				drag_offset = drag_screen_origin - window_position
+				behavior.begin_drag(Vector2(drag_screen_origin))
 			elif event.pressed and swarm.visible:
 				swarm.kick_near(event.position, Vector2(0.0, -120.0))
 			elif not event.pressed and pointer_held:
 				pointer_held = false
-				frog.set_held(false)
 				if dragging:
 					behavior.end_drag(DesktopBounds.current_work_area(), PET_WINDOW_SIZE)
+					_set_window_position(behavior.window_position)
 					_save_settings()
 				else:
 					var result := behavior.poke(DesktopBounds.current_work_area(), PET_WINDOW_SIZE)
@@ -103,15 +88,8 @@ func _input(event: InputEvent) -> void:
 					elif result.heavy_fall:
 						frog.play_impact()
 				_apply_behavior_visuals()
-				_apply_pixelation()
 				_update_mouse_region()
 				get_viewport().set_input_as_handled()
-
-func _unhandled_key_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		behavior.dismiss_tongue()
-		_apply_behavior_visuals()
-
 func _build_menu() -> void:
 	menu = PopupMenu.new()
 	menu.theme = PetTheme.create_popup_theme()
@@ -167,21 +145,6 @@ func _on_menu_pressed(id: int) -> void:
 func _apply_behavior_visuals() -> void:
 	if is_instance_valid(frog):
 		frog.apply_behavior(behavior)
-
-func _apply_pixelation() -> void:
-	if not is_instance_valid(effects) or not effects.material is ShaderMaterial:
-		return
-	var material := effects.material as ShaderMaterial
-	material.set_shader_parameter("pixel_size", lerpf(1.0, 10.0, behavior.pixelation_amount))
-
-func _update_pointer_activity(position: Vector2, pointer_moved: bool) -> void:
-	var pointer_on_pet: bool = frog.is_point_on_pet(position)
-	if pointer_on_pet and (not pointer_was_on_pet or pointer_moved):
-		var restored := behavior.wake_up()
-		if restored:
-			frog.play_blink()
-			_apply_pixelation()
-	pointer_was_on_pet = pointer_on_pet
 
 func _update_mouse_region() -> void:
 	if not is_instance_valid(frog) or not is_instance_valid(swarm):

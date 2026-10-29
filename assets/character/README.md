@@ -1,3 +1,3 @@
 # Character Assets
 
-Store verified original sprites and runtime-ready character images here. Keep animation frames grouped by character and action. Add provenance, license, attribution, and processing notes before importing third-party art.
+Store character images used by the game here. The current standing sprite is `stand.png`. Keep future animation frames grouped by action when there are enough files to justify subfolders. Add provenance, license, attribution, and processing notes before importing third-party art.

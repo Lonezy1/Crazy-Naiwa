@@ -2,9 +2,11 @@ extends SceneTree
 
 const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 const FrogVisual = preload("res://scripts/entities/FrogVisual.gd")
+const FrogVisualScene = preload("res://scenes/FrogVisual.tscn")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetSwarm = preload("res://scripts/entities/PetSwarm.gd")
+const FrogTexture: Texture2D = preload("res://assets/character/stand.png")
 
 var failures := 0
 
@@ -88,22 +90,21 @@ func _test_behavior() -> void:
 	behavior.end_drag(work_area, window_size)
 	_expect(behavior.mode == PetBehavior.Mode.LAUNCH, "drag release launches")
 	_expect(behavior.velocity.x < 0.0, "drag launches opposite to pull")
-
-	behavior.tongue_seconds = 1.0
-	behavior.wake_up()
-	_expect(behavior.tongue_seconds > 0.0, "pointer wake does not dismiss the tongue")
-	_expect(behavior.add_tongue_wiggle(300.0), "tongue releases after enough movement")
-	_expect(behavior.tongue_seconds == 0.0, "released tongue is dismissed")
-
-	behavior.advance(612.0, work_area, window_size)
-	_expect(behavior.pixelation_amount == 1.0, "idle state reaches full pixelation")
-	_expect(behavior.record_activity(), "activity detects pixelated state")
-	_expect(behavior.pixelation_amount == 0.0, "activity resets pixelation")
+	behavior.begin_drag(Vector2(400, 300))
+	behavior.move_drag(Vector2(900, 700), Vector2(900, 700))
+	behavior.end_drag(work_area, window_size)
+	_expect(behavior.window_position == Vector2(480, 280), "drag release clamps the pet to the work area")
 
 func _test_frog_hit_region() -> void:
-	var frog := FrogVisual.new()
+	_expect(FrogTexture.get_width() == 406 and FrogTexture.get_height() == 615, "character texture imports")
+	var frog := FrogVisualScene.instantiate() as FrogVisual
 	root.add_child(frog)
 	await process_frame
+	var sprite := frog.get_node_or_null("CharacterImage") as Sprite2D
+	_expect(sprite != null, "frog creates a character sprite")
+	if sprite:
+		_expect(sprite.texture == FrogTexture, "sprite uses the project character texture")
+		_expect(sprite.material == null, "character sprite uses its texture without a screen sampler shader")
 	frog.position = Vector2(160, 172)
 	_expect(frog.is_point_on_pet(Vector2(160, 172)), "frog center is clickable")
 	_expect(not frog.is_point_on_pet(Vector2(0, 0)), "transparent area is not clickable")
@@ -123,6 +124,7 @@ func _test_swarm() -> void:
 	_expect(swarm.visible, "swarm reveals its play area")
 	swarm.kick_near(Vector2(160, 100), Vector2(0, -20))
 	swarm.remaining_seconds = 0.001
+	await process_frame
 	await process_frame
 	_expect(swarm.get_clone_count() == 0, "swarm automatically clears after its timer")
 	_expect(not swarm.visible, "automatic cleanup hides the swarm play area")

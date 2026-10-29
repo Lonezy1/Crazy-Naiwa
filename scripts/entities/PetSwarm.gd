@@ -52,13 +52,13 @@ func clear() -> void:
 func get_clone_count() -> int:
 	return clone_container.get_child_count() if is_instance_valid(clone_container) else 0
 
-func kick_near(position: Vector2, impulse: Vector2) -> void:
+func kick_near(target_position: Vector2, impulse: Vector2) -> void:
 	if not simulation_enabled:
 		return
 	for body: RigidBody2D in clone_container.get_children():
-		var distance: float = body.position.distance_to(position)
+		var distance: float = body.position.distance_to(target_position)
 		if distance <= 90.0:
-			var direction: Vector2 = (body.position - position).normalized()
+			var direction: Vector2 = (body.position - target_position).normalized()
 			body.apply_central_impulse(direction * (1.0 - distance / 90.0) * impulse.length() + impulse * 0.18)
 
 func set_simulation_enabled(value: bool) -> void:

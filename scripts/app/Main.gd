@@ -33,8 +33,6 @@ func _ready() -> void:
 	swarm.activity_finished.connect(_on_swarm_activity_finished)
 
 func _process(delta: float) -> void:
-	var pointer_position := get_viewport().get_mouse_position()
-	frog.set_pointer_position(pointer_position)
 	var work_area := DesktopBounds.current_work_area()
 	if not pointer_held:
 		var events := behavior.advance(delta, work_area, PET_WINDOW_SIZE)
@@ -162,8 +160,8 @@ func _update_mouse_region() -> void:
 func _on_swarm_activity_finished() -> void:
 	_update_mouse_region()
 
-func _set_window_position(position: Vector2) -> void:
-	get_window().position = Vector2i(roundi(position.x), roundi(position.y))
+func _set_window_position(target_position: Vector2) -> void:
+	get_window().position = Vector2i(roundi(target_position.x), roundi(target_position.y))
 
 func _restore_window_position() -> void:
 	var target := DesktopBounds.current_work_area()

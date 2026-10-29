@@ -20,8 +20,8 @@ var drag_anchor := Vector2.ZERO
 var drag_total := Vector2.ZERO
 var mode_before_drag := Mode.DVD_BOUNCE
 
-func initialize(position: Vector2) -> void:
-	window_position = position
+func initialize(initial_position: Vector2) -> void:
+	window_position = initial_position
 
 func advance(delta: float, work_area: Rect2i, window_size: Vector2i) -> Dictionary:
 	var events := {"corner_hit": false, "landed": false}
@@ -108,8 +108,8 @@ func begin_drag(mouse_position: Vector2) -> void:
 	mode = Mode.DRAG
 	velocity = Vector2.ZERO
 
-func move_drag(position: Vector2, mouse_position: Vector2) -> void:
-	window_position = position
+func move_drag(target_position: Vector2, mouse_position: Vector2) -> void:
+	window_position = target_position
 	drag_total = mouse_position - drag_anchor
 
 func end_drag(work_area: Rect2i, window_size: Vector2i) -> void:

@@ -101,8 +101,8 @@ func _draw() -> void:
 		scale_y *= 1.0 - impact * 0.19
 	image_sprite.scale = base_image_scale * Vector2(scale_x, scale_y)
 	image_sprite.rotation = tilt
-	var transform := Transform2D(tilt, Vector2(scale_x, scale_y), 0.0, Vector2.ZERO)
-	draw_set_transform_matrix(transform)
+	var draw_transform := Transform2D(tilt, Vector2(scale_x, scale_y), 0.0, Vector2.ZERO)
+	draw_set_transform_matrix(draw_transform)
 	_draw_frog()
 	if corner_flash_seconds > 0.0:
 		_draw_corner_burst()

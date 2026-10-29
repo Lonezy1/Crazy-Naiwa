@@ -8,7 +8,7 @@
 script = ExtResource("1_main")
 
 [node name="Frog" parent="." unique_id=2057886652 instance=ExtResource("2_frog_visual")]
-position = Vector2(160, 160)
+position = Vector2(176, 162)
 
 [node name="PetSwarm" type="Node2D" parent="." unique_id=1557275695]
 script = ExtResource("3_swarm")

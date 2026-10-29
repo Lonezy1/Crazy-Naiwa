@@ -1,0 +1,8 @@
+.godot/
+.import/
+build/
+dist/
+*.tmp
+
+奶蛙素材/
+*.import

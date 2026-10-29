@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource path="res://scripts/Main.gd" type="Script" id="1_main"]
+[ext_resource path="res://scripts/FrogVisual.gd" type="Script" id="2_frog"]
+
+[node name="CrazyNaiwa" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Frog" type="Node2D" parent="."]
+position = Vector2(160, 172)
+script = ExtResource("2_frog")

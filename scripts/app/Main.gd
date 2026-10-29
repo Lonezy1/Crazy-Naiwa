@@ -55,7 +55,7 @@ func _input(event: InputEvent) -> void:
 			if dragging:
 				var next_window_position := screen_mouse - drag_offset
 				behavior.move_drag(Vector2(next_window_position), Vector2(screen_mouse))
-				get_window().position = next_window_position
+				_set_window_position(Vector2(next_window_position))
 				_apply_behavior_visuals()
 				get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
@@ -161,7 +161,7 @@ func _on_swarm_activity_finished() -> void:
 	_update_mouse_region()
 
 func _set_window_position(target_position: Vector2) -> void:
-	get_window().position = Vector2i(roundi(target_position.x), roundi(target_position.y))
+	DisplayServer.window_set_position(Vector2i(roundi(target_position.x), roundi(target_position.y)), 0)
 
 func _restore_window_position() -> void:
 	var target := DesktopBounds.current_work_area()
@@ -171,7 +171,7 @@ func _restore_window_position() -> void:
 			if usable.has_point(PetSettings.window_position):
 				target = usable
 				break
-		get_window().position = DesktopBounds.clamp_position(PetSettings.window_position, target, PET_WINDOW_SIZE)
+		_set_window_position(DesktopBounds.clamp_position(PetSettings.window_position, target, PET_WINDOW_SIZE))
 	else:
 		_move_to_corner()
 
@@ -179,7 +179,7 @@ func _move_to_corner() -> void:
 	var usable := DesktopBounds.current_work_area()
 	var maximum := DesktopBounds.max_window_position(usable, PET_WINDOW_SIZE)
 	var destination := Vector2i(maxi(usable.position.x, maximum.x - 18), maxi(usable.position.y, maximum.y - 24))
-	get_window().position = destination
+	_set_window_position(Vector2(destination))
 	behavior.window_position = Vector2(destination)
 	_save_settings()
 

@@ -9,6 +9,8 @@ enum Effect {
 	BURST,
 	SWARM_SPAWN,
 	SWARM_CLEAR,
+	GRAB_START,
+	THROW,
 }
 
 const SAMPLE_RATE := 22050
@@ -23,6 +25,8 @@ const EFFECT_SPECS := {
 	Effect.BURST: {"duration": 0.34, "start_hz": 380.0, "end_hz": 980.0, "gain": 0.34, "harmonic": 0.12, "noise": 0.015, "decay": 1.9},
 	Effect.SWARM_SPAWN: {"duration": 0.22, "start_hz": 310.0, "end_hz": 920.0, "gain": 0.3, "harmonic": 0.1, "noise": 0.01, "decay": 1.8},
 	Effect.SWARM_CLEAR: {"duration": 0.18, "start_hz": 880.0, "end_hz": 320.0, "gain": 0.28, "harmonic": 0.08, "noise": 0.0, "decay": 2.0},
+	Effect.GRAB_START: {"duration": 0.07, "start_hz": 420.0, "end_hz": 610.0, "gain": 0.2, "harmonic": 0.04, "noise": 0.0, "decay": 2.2},
+	Effect.THROW: {"duration": 0.24, "start_hz": 220.0, "end_hz": 1180.0, "gain": 0.32, "harmonic": 0.1, "noise": 0.015, "decay": 1.7},
 }
 const EFFECT_COOLDOWNS_MS := {
 	Effect.MENU_CLICK: 35,

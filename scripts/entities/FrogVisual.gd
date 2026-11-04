@@ -3,6 +3,7 @@ extends Node2D
 const PetTheme = preload("res://scripts/ui/PetTheme.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const MAX_VISIBLE_INFLATION := 1.8
+const GRAB_TEXTURE_PATH := "res://assets/character/drag_hold.png"
 
 var velocity := Vector2.ZERO
 var mode := PetBehavior.Mode.DVD_BOUNCE
@@ -16,10 +17,16 @@ var idle_phase := 0.0
 var base_scale := Vector2.ONE
 var image_sprite: Sprite2D
 var base_image_scale := Vector2.ONE
+var stand_texture: Texture2D
+var grab_texture: Texture2D
+var display_size_scale := 1.0
+var is_dragging := false
 
 func _ready() -> void:
 	base_scale = scale
 	image_sprite = get_node("CharacterImage") as Sprite2D
+	stand_texture = image_sprite.texture
+	grab_texture = load(GRAB_TEXTURE_PATH) as Texture2D if ResourceLoader.exists(GRAB_TEXTURE_PATH) else stand_texture
 	base_image_scale = image_sprite.scale
 	image_sprite.z_index = -1
 
@@ -32,7 +39,8 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func apply_behavior(state: PetBehavior) -> void:
-	mode = state.mode
+	mode = PetBehavior.Mode.DRAG if is_dragging else state.mode
+	image_sprite.texture = grab_texture if is_dragging or state.mode == PetBehavior.Mode.DRAG else stand_texture
 	velocity = state.velocity
 	var inflation_progress := float(state.inflation_hits) / float(PetBehavior.MAX_POKE_COUNT - 1)
 	inflation_scale = lerpf(1.0, MAX_VISIBLE_INFLATION, clampf(inflation_progress, 0.0, 1.0))
@@ -40,6 +48,19 @@ func apply_behavior(state: PetBehavior) -> void:
 	impact_seconds = state.impact_seconds
 	corner_flash_seconds = state.corner_flash_seconds
 	drag_vector = state.drag_total
+
+func set_display_size_scale(value: float) -> void:
+	display_size_scale = maxf(0.15, value)
+	base_scale = Vector2.ONE * display_size_scale
+	scale = base_scale * inflation_scale
+
+func set_dragging(value: bool) -> void:
+	is_dragging = value
+	if is_dragging:
+		mode = PetBehavior.Mode.DRAG
+	else:
+		mode = PetBehavior.Mode.IDLE
+	queue_redraw()
 
 func play_burst() -> void:
 	burst_seconds = 0.65
@@ -56,17 +77,31 @@ func is_point_on_pet(viewport_position: Vector2) -> bool:
 	return normalized.length_squared() <= 1.0
 
 func get_mouse_region() -> PackedVector2Array:
-	var local_points := PackedVector2Array([
+	var window_points := PackedVector2Array()
+	for point in _content_outline():
+		window_points.append(to_global(point))
+	return window_points
+
+func get_content_bounds() -> Rect2:
+	var points := _content_outline()
+	var minimum := Vector2(INF, INF)
+	var maximum := Vector2(-INF, -INF)
+	for point in points:
+		var transformed := position + Vector2(point.x * scale.x, point.y * scale.y)
+		minimum.x = minf(minimum.x, transformed.x)
+		minimum.y = minf(minimum.y, transformed.y)
+		maximum.x = maxf(maximum.x, transformed.x)
+		maximum.y = maxf(maximum.y, transformed.y)
+	return Rect2(minimum, maximum - minimum)
+
+func _content_outline() -> PackedVector2Array:
+	return PackedVector2Array([
 		Vector2(-22, -120), Vector2(18, -122), Vector2(49, -101),
 		Vector2(69, -67), Vector2(78, -20), Vector2(75, 34),
 		Vector2(62, 81), Vector2(45, 111), Vector2(16, 125),
 		Vector2(-25, 116), Vector2(-54, 91), Vector2(-72, 53),
 		Vector2(-79, 10), Vector2(-73, -42), Vector2(-56, -88)
 	])
-	var window_points := PackedVector2Array()
-	for point in local_points:
-		window_points.append(to_global(point))
-	return window_points
 
 func play_blink() -> void:
 	blink_seconds = 0.18

@@ -5,7 +5,11 @@ const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 enum Mode { IDLE, DVD_BOUNCE, SLITHER, FLOAT, FALL, LAUNCH, DRAG }
 
 const MAX_POKE_COUNT := 10
-const MAX_LAUNCH_SPEED := 760.0
+const THROW_SPEED_THRESHOLD := 720.0
+const MAX_THROW_SPEED := 1100.0
+const THROW_SPEED_SCALE := 0.95
+const FLOAT_ASCEND_SPEED := 900.0
+const CONTENT_EDGE_MARGIN := 2.0
 
 var enabled := true
 var mode := Mode.DVD_BOUNCE
@@ -23,53 +27,73 @@ var mode_before_drag := Mode.DVD_BOUNCE
 func initialize(initial_position: Vector2) -> void:
 	window_position = initial_position
 
-func advance(delta: float, work_area: Rect2i, window_size: Vector2i) -> Dictionary:
+func advance(
+	delta: float,
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2 = Rect2(),
+	edge_margin: float = CONTENT_EDGE_MARGIN
+) -> Dictionary:
 	var events := {"corner_hit": false, "landed": false}
 	impact_seconds = maxf(0.0, impact_seconds - delta)
 	corner_flash_seconds = maxf(0.0, corner_flash_seconds - delta)
-	if not enabled or mode == Mode.IDLE or mode == Mode.DRAG:
+	if mode == Mode.IDLE or mode == Mode.DRAG:
 		return events
 	mode_time -= delta
 	match mode:
 		Mode.DVD_BOUNCE:
-			var result := DesktopBounds.advance_bounce(window_position, velocity, delta, work_area, window_size)
+			var result := DesktopBounds.advance_bounce(
+				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
+			)
 			window_position = result.position
 			velocity = result.velocity
 			events.corner_hit = result.corner_hit
 			if events.corner_hit:
 				corner_flash_seconds = 1.0
 			if mode_time <= 0.0:
-				_start_random_antics(work_area, window_size)
+				_start_random_antics(work_area, window_size, content_rect, edge_margin)
 		Mode.SLITHER:
-			var maximum := DesktopBounds.max_window_position(work_area, window_size)
+			var minimum_x := float(work_area.position.x)
+			var maximum := _maximum_position(work_area, window_size, content_rect, edge_margin)
+			if content_rect.size.x > 0.0 and content_rect.size.y > 0.0:
+				minimum_x = float(DesktopBounds.content_position_limits(work_area, content_rect, edge_margin).minimum.x)
 			window_position.y = maximum.y
 			window_position.x += velocity.x * delta
-			if window_position.x < work_area.position.x or window_position.x > maximum.x:
-				window_position.x = clampf(window_position.x, work_area.position.x, maximum.x)
+			if window_position.x < minimum_x or window_position.x > maximum.x:
+				window_position.x = clampf(window_position.x, minimum_x, maximum.x)
 				velocity.x *= -1.0
 			if mode_time <= 0.0:
 				_start_dvd_bounce()
 		Mode.FLOAT:
-			window_position.y = move_toward(window_position.y, work_area.position.y, 58.0 * delta)
-			if mode_time <= 0.0:
+			var top_position := float(work_area.position.y)
+			if content_rect.size.y > 0.0:
+				var limits := DesktopBounds.content_position_limits(work_area, content_rect, edge_margin)
+				top_position = float(limits.minimum.y)
+			window_position.y = move_toward(window_position.y, top_position, FLOAT_ASCEND_SPEED * delta)
+			if window_position.y <= top_position or mode_time <= 0.0:
+				window_position.y = top_position
 				mode = Mode.FALL
 				mode_time = 8.0
 				velocity = Vector2(0.0, 260.0)
 		Mode.FALL:
 			velocity.y += 1850.0 * delta
-			var result := DesktopBounds.advance_bounce(window_position, velocity, delta, work_area, window_size)
+			var result := DesktopBounds.advance_bounce(
+				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
+			)
 			window_position = result.position
 			velocity = result.velocity
 			if result.hit_y and velocity.y < 0.0:
 				velocity.y = 0.0
 				velocity.x = 0.0
 				impact_seconds = 0.42
-				mode = Mode.DVD_BOUNCE
+				mode = Mode.DVD_BOUNCE if enabled else Mode.IDLE
 				mode_time = 4.0
 				events.landed = true
 		Mode.LAUNCH:
 			velocity.y += 980.0 * delta
-			var result := DesktopBounds.advance_bounce(window_position, velocity, delta, work_area, window_size)
+			var result := DesktopBounds.advance_bounce(
+				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
+			)
 			window_position = result.position
 			velocity = result.velocity
 			events.corner_hit = result.corner_hit
@@ -81,7 +105,12 @@ func advance(delta: float, work_area: Rect2i, window_size: Vector2i) -> Dictiona
 				_start_dvd_bounce()
 	return events
 
-func poke(work_area: Rect2i, window_size: Vector2i) -> Dictionary:
+func poke(
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2 = Rect2(),
+	edge_margin: float = CONTENT_EDGE_MARGIN
+) -> Dictionary:
 	if mode == Mode.DRAG:
 		mode = mode_before_drag
 	if mode == Mode.FLOAT:
@@ -98,7 +127,7 @@ func poke(work_area: Rect2i, window_size: Vector2i) -> Dictionary:
 	mode = Mode.LAUNCH
 	mode_time = 4.5
 	velocity = Vector2(randf_range(-440.0, 440.0), -560.0)
-	window_position = DesktopBounds.clamp_position(window_position, work_area, window_size)
+	window_position = _clamp_to_content(window_position, work_area, window_size, content_rect, edge_margin)
 	return {"heavy_fall": false, "burst": true, "inflation": inflation_scale}
 
 func begin_drag(mouse_position: Vector2) -> void:
@@ -112,16 +141,29 @@ func move_drag(target_position: Vector2, mouse_position: Vector2) -> void:
 	window_position = target_position
 	drag_total = mouse_position - drag_anchor
 
-func end_drag(work_area: Rect2i, window_size: Vector2i) -> void:
-	var pull := drag_total
-	if pull.length() >= 20.0:
+func end_drag(
+	work_area: Rect2i,
+	window_size: Vector2i,
+	release_velocity: Vector2,
+	throw_mode_enabled: bool,
+	content_rect: Rect2 = Rect2(),
+	edge_margin: float = CONTENT_EDGE_MARGIN
+) -> Dictionary:
+	window_position = _clamp_to_content(window_position, work_area, window_size, content_rect, edge_margin)
+	drag_total = Vector2.ZERO
+	if not throw_mode_enabled:
+		mode = Mode.IDLE
+		velocity = Vector2.ZERO
+		return {"action": "move"}
+	if release_velocity.length() >= THROW_SPEED_THRESHOLD:
 		mode = Mode.LAUNCH
 		mode_time = 5.0
-		velocity = -pull.normalized() * minf(pull.length() * 2.2, MAX_LAUNCH_SPEED)
-	else:
-		_start_dvd_bounce()
-	window_position = DesktopBounds.clamp_position(window_position, work_area, window_size)
-	drag_total = Vector2.ZERO
+		velocity = release_velocity.limit_length(MAX_THROW_SPEED) * THROW_SPEED_SCALE
+		return {"action": "throw"}
+	mode = Mode.FALL
+	mode_time = 8.0
+	velocity = Vector2.ZERO
+	return {"action": "fall"}
 
 func set_enabled(value: bool) -> void:
 	enabled = value
@@ -131,11 +173,16 @@ func set_enabled(value: bool) -> void:
 		mode = Mode.IDLE
 		velocity = Vector2.ZERO
 
-func start_slither(work_area: Rect2i, window_size: Vector2i) -> void:
+func start_slither(
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2 = Rect2(),
+	edge_margin: float = CONTENT_EDGE_MARGIN
+) -> void:
 	mode = Mode.SLITHER
 	mode_time = 7.0
 	velocity = Vector2(164.0 if velocity.x >= 0.0 else -164.0, 0.0)
-	window_position.y = DesktopBounds.max_window_position(work_area, window_size).y
+	window_position.y = _maximum_position(work_area, window_size, content_rect, edge_margin).y
 
 func start_float() -> void:
 	mode = Mode.FLOAT
@@ -151,13 +198,39 @@ func _start_dvd_bounce() -> void:
 	if velocity.length() < 70.0:
 		velocity = Vector2(178.0, -132.0)
 
-func _start_random_antics(work_area: Rect2i, window_size: Vector2i) -> void:
+func _start_random_antics(
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2,
+	edge_margin: float
+) -> void:
 	if randi_range(0, 1) == 0:
 		mode = Mode.SLITHER
 		mode_time = randf_range(4.0, 7.0)
 		velocity = Vector2(164.0 if velocity.x >= 0.0 else -164.0, 0.0)
-		window_position.y = DesktopBounds.max_window_position(work_area, window_size).y
+		window_position.y = _maximum_position(work_area, window_size, content_rect, edge_margin).y
 	else:
 		mode = Mode.FLOAT
 		mode_time = randf_range(5.0, 8.0)
 		velocity = Vector2.ZERO
+
+func _clamp_to_content(
+	position: Vector2,
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2,
+	edge_margin: float
+) -> Vector2:
+	if content_rect.size.x > 0.0 and content_rect.size.y > 0.0:
+		return DesktopBounds.clamp_position_to_content(position, work_area, content_rect, edge_margin)
+	return DesktopBounds.clamp_position(position, work_area, window_size)
+
+func _maximum_position(
+	work_area: Rect2i,
+	window_size: Vector2i,
+	content_rect: Rect2,
+	edge_margin: float
+) -> Vector2:
+	if content_rect.size.x > 0.0 and content_rect.size.y > 0.0:
+		return Vector2(DesktopBounds.content_position_limits(work_area, content_rect, edge_margin).maximum)
+	return Vector2(DesktopBounds.max_window_position(work_area, window_size))

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="176" height="16" viewBox="0 0 176 16">
+  <g fill="none" stroke="#14221a" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(0 0)">
+      <path d="M3.5 11.5V8a4.5 4.5 0 0 1 4.5-4.5h4"/><path d="m9.5 1.5 2.5 2-2.5 2"/><path d="m3.5 11.5-1.5-1.5m1.5 1.5L5 10"/>
+    </g>
+    <g transform="translate(16 0)">
+      <path d="M2 9c2.5-6 4.5 4 7 0s4.5 4 7-1"/><path d="m13 5 3 3-3 2"/>
+    </g>
+    <g transform="translate(32 0)">
+      <path d="M8 2v12"/><path d="m5 5 3-3 3 3"/><path d="m5 11 3 3 3-3"/>
+    </g>
+    <g transform="translate(48 0)">
+      <rect x="2.5" y="2.5" width="8" height="8" rx="1.5"/><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/>
+    </g>
+    <g transform="translate(64 0)">
+      <path d="M3 4.5h10"/><path d="m5 4.5.6 8h4.8l.6-8"/><path d="M6 2.5h4"/><path d="M6.5 7v3m3-3v3"/>
+    </g>
+    <g transform="translate(80 0)">
+      <path d="M2.5 6v4h3l4 3V3l-4 3h-3Z"/><path d="M12 6a3 3 0 0 1 0 4"/><path d="M13.5 4a6 6 0 0 1 0 8"/>
+    </g>
+    <g transform="translate(96 0)">
+      <path d="M3 13V8a5 5 0 0 1 5-5h5"/><path d="m10 1.5 3 1.5-3 2"/><path d="M3 13h3"/>
+    </g>
+    <g transform="translate(112 0)">
+      <path d="M5 3.5v9"/><path d="M10 3.5v9"/>
+    </g>
+    <g transform="translate(128 0)">
+      <path d="m10.5 2.5 3 3"/><path d="m8 4.5 3.5 3.5-2 2-2.5-1-2-2 3-3Z"/><path d="m7 9 5 5"/><path d="m7 9-4 5"/>
+    </g>
+    <g transform="translate(144 0)">
+      <path d="M9.5 13.5h-6v-11h6"/><path d="M7 8h7"/><path d="m11 5 3 3-3 3"/>
+    </g>
+    <g transform="translate(160 0)">
+      <path d="M8 2.5 5.5 5H3v6h2.5L8 13.5v-11Z"/><path d="m11 6 3 4m0-4-3 4"/>
+    </g>
+  </g>
+</svg>

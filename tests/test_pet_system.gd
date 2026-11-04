@@ -6,6 +6,8 @@ const FrogVisualScene = preload("res://scenes/FrogVisual.tscn")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetSwarm = preload("res://scripts/entities/PetSwarm.gd")
+const PetAudio = preload("res://scripts/audio/PetAudio.gd")
+const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
 const FrogTexture: Texture2D = preload("res://assets/character/stand.png")
 
 var failures := 0
@@ -15,6 +17,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	_test_settings()
+	await _test_audio_and_menu()
 	_test_desktop_bounds()
 	_test_behavior()
 	await _test_frog_hit_region()
@@ -32,6 +35,8 @@ func _test_settings() -> void:
 	saved.settings_path = path
 	saved.always_on_top = false
 	saved.antics_enabled = false
+	saved.sound_enabled = false
+	saved.sfx_volume = 0.25
 	saved.window_position = Vector2i(120, 240)
 	saved.has_window_position = true
 	saved.save_settings()
@@ -41,11 +46,48 @@ func _test_settings() -> void:
 	loaded.load_settings()
 	_expect(not loaded.always_on_top, "settings preserve always_on_top")
 	_expect(not loaded.antics_enabled, "settings preserve antics_enabled")
+	_expect(not loaded.sound_enabled, "settings preserve sound_enabled")
+	_expect(is_equal_approx(loaded.sfx_volume, 0.25), "settings preserve sfx_volume")
 	_expect(loaded.has_window_position, "settings preserve position presence")
 	_expect(loaded.window_position == Vector2i(120, 240), "settings preserve window position")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	saved.free()
 	loaded.free()
+
+func _test_audio_and_menu() -> void:
+	for effect in PetAudio.EFFECT_SPECS.keys():
+		var stream := PetAudio.create_effect_stream(effect)
+		_expect(stream != null, "audio effect stream is created")
+		if stream:
+			_expect(stream.mix_rate == PetAudio.SAMPLE_RATE, "audio effect uses shared sample rate")
+			_expect(stream.data.size() > 0, "audio effect contains PCM data")
+	var audio := PetAudio.new()
+	root.add_child(audio)
+	await process_frame
+	var settings := root.get_node("PetSettings")
+	var original_sound_enabled: bool = settings.sound_enabled
+	settings.sound_enabled = false
+	audio.sync_settings()
+	_expect(not audio.play_effect(PetAudio.Effect.POKE), "muted setting blocks sound playback")
+	settings.sound_enabled = original_sound_enabled
+	audio.sync_settings()
+	audio.queue_free()
+	var menu := PetContextMenu.new()
+	root.add_child(menu)
+	await process_frame
+	_expect(not menu.visible, "context menu stays hidden until requested")
+	menu.refresh_state(false, true, false, 0.25, 0)
+	_expect(menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu marks paused state")
+	_expect(menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ALWAYS_ON_TOP)), "menu marks always-on-top state")
+	_expect(not menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_SOUND)), "menu marks muted state")
+	_expect(menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu disables empty clone cleanup")
+	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.QUARTER)), "volume submenu reflects selected level")
+	menu.refresh_state(true, false, true, 0.5, 50)
+	_expect(not menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu reflects resumed state")
+	_expect(not menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu enables clone cleanup when clones exist")
+	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.HALF)), "volume submenu updates selected level")
+	menu.queue_free()
+	await process_frame
 
 func _test_desktop_bounds() -> void:
 	var work_area := Rect2i(100, 50, 400, 300)

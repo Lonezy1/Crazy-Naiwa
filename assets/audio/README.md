@@ -1,3 +1,3 @@
 # Audio Assets
 
-Store verified sound effects and music here, grouped by gameplay use. Document format, source, license, attribution, and any edits before import.
+Current UI and pet effects are synthesized at runtime in `scripts/audio/PetAudio.gd`, so no external audio asset is required. If recorded or third-party audio is added later, group it by use and document its format, source, license, attribution, and edits before import.

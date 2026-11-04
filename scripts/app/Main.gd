@@ -2,13 +2,15 @@ extends Node2D
 
 const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
-const PetTheme = preload("res://scripts/ui/PetTheme.gd")
+const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
+const PetAudio = preload("res://scripts/audio/PetAudio.gd")
 const PET_WINDOW_SIZE := Vector2i(320, 320)
 
 var behavior := PetBehavior.new()
 var frog: Node2D
 var swarm: Node2D
-var menu: PopupMenu
+var menu: PetContextMenu
+var audio: PetAudio
 var pointer_held := false
 var dragging := false
 var drag_screen_origin := Vector2i.ZERO
@@ -27,6 +29,9 @@ func _ready() -> void:
 	behavior.set_enabled(PetSettings.antics_enabled)
 	behavior.initialize(Vector2(pet_window.position))
 	swarm.set_simulation_enabled(PetSettings.antics_enabled)
+	audio = PetAudio.new()
+	audio.name = "PetAudio"
+	add_child(audio)
 	_build_menu()
 	_apply_behavior_visuals()
 	_update_mouse_region()
@@ -34,12 +39,14 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	var work_area := DesktopBounds.current_work_area()
-	if not pointer_held:
+	if not pointer_held and not menu.visible:
 		var events := behavior.advance(delta, work_area, PET_WINDOW_SIZE)
 		if events.corner_hit:
 			frog.play_blink()
+			audio.play_effect(PetAudio.Effect.CORNER_BUMP)
 		if events.landed:
 			frog.play_impact()
+			audio.play_effect(PetAudio.Effect.LAND)
 		_set_window_position(behavior.window_position)
 	_apply_behavior_visuals()
 
@@ -60,6 +67,7 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+			_refresh_menu_state()
 			menu.position = DisplayServer.mouse_get_position()
 			menu.popup()
 			get_viewport().set_input_as_handled()
@@ -79,66 +87,80 @@ func _input(event: InputEvent) -> void:
 					behavior.end_drag(DesktopBounds.current_work_area(), PET_WINDOW_SIZE)
 					_set_window_position(behavior.window_position)
 					_save_settings()
+					audio.play_effect(PetAudio.Effect.DRAG_RELEASE)
 				else:
 					var result := behavior.poke(DesktopBounds.current_work_area(), PET_WINDOW_SIZE)
 					if result.burst:
 						frog.play_burst()
+						audio.play_effect(PetAudio.Effect.BURST)
 					elif result.heavy_fall:
 						frog.play_impact()
+						audio.play_effect(PetAudio.Effect.LAND)
+					else:
+						audio.play_effect(PetAudio.Effect.POKE)
 				_apply_behavior_visuals()
 				_update_mouse_region()
 				get_viewport().set_input_as_handled()
 func _build_menu() -> void:
-	menu = PopupMenu.new()
-	menu.theme = PetTheme.create_popup_theme()
-	menu.add_item("DVD 弹跳", 1)
-	menu.add_item("立即蛄蛹", 2)
-	menu.add_item("飘到顶端再坠落", 3)
-	menu.add_separator()
-	menu.add_item("分裂 50 只", 4)
-	menu.add_item("清理分身", 5)
-	menu.add_separator()
-	menu.add_check_item("暂停整活", 6)
-	menu.add_check_item("总在最上面", 7)
-	menu.add_separator()
-	menu.add_item("回到屏幕右下角", 8)
-	menu.add_item("退出奶蛙", 9)
-	menu.id_pressed.connect(_on_menu_pressed)
+	menu = PetContextMenu.new()
+	menu.command_selected.connect(_on_menu_pressed)
+	menu.setting_selected.connect(_on_menu_setting_selected)
+	menu.volume_selected.connect(_on_menu_volume_selected)
 	add_child(menu)
-	_apply_menu_state()
+	_refresh_menu_state()
 
 func _on_menu_pressed(id: int) -> void:
 	match id:
-		1:
+		PetContextMenu.Command.DVD_BOUNCE:
 			behavior.start_dvd_bounce()
-		2:
+			audio.play_effect(PetAudio.Effect.MENU_CLICK)
+		PetContextMenu.Command.SLITHER:
 			behavior.start_slither(DesktopBounds.current_work_area(), PET_WINDOW_SIZE)
-		3:
+			audio.play_effect(PetAudio.Effect.MENU_CLICK)
+		PetContextMenu.Command.FLOAT_FALL:
 			behavior.start_float()
-		4:
+			audio.play_effect(PetAudio.Effect.MENU_CLICK)
+		PetContextMenu.Command.SPAWN_CLONES:
 			swarm.set_simulation_enabled(PetSettings.antics_enabled)
 			swarm.spawn()
+			audio.play_effect(PetAudio.Effect.SWARM_SPAWN)
 			_update_mouse_region()
-		5:
-			swarm.clear()
+		PetContextMenu.Command.CLEAR_CLONES:
+			if swarm.get_clone_count() > 0:
+				swarm.clear()
+				audio.play_effect(PetAudio.Effect.SWARM_CLEAR)
 			_update_mouse_region()
-		6:
-			PetSettings.antics_enabled = not PetSettings.antics_enabled
-			behavior.set_enabled(PetSettings.antics_enabled)
-			swarm.set_simulation_enabled(PetSettings.antics_enabled)
-			PetSettings.save_settings()
-			_apply_menu_state()
-		7:
-			PetSettings.always_on_top = not PetSettings.always_on_top
-			get_window().always_on_top = PetSettings.always_on_top
-			PetSettings.save_settings()
-			_apply_menu_state()
-		8:
+		PetContextMenu.Command.MOVE_TO_CORNER:
 			_move_to_corner()
-		9:
+			audio.play_effect(PetAudio.Effect.MENU_CLICK)
+		PetContextMenu.Command.QUIT:
 			_save_settings()
 			get_tree().quit()
 	_apply_behavior_visuals()
+	_refresh_menu_state()
+
+func _on_menu_setting_selected(setting: int, enabled: bool) -> void:
+	match setting:
+		PetContextMenu.Setting.ANTICS_ENABLED:
+			PetSettings.antics_enabled = enabled
+			behavior.set_enabled(enabled)
+			swarm.set_simulation_enabled(enabled)
+		PetContextMenu.Setting.ALWAYS_ON_TOP:
+			PetSettings.always_on_top = enabled
+			get_window().always_on_top = enabled
+		PetContextMenu.Setting.SOUND_ENABLED:
+			PetSettings.sound_enabled = enabled
+			audio.sync_settings()
+	PetSettings.save_settings()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
+func _on_menu_volume_selected(value: float) -> void:
+	PetSettings.sfx_volume = value
+	PetSettings.save_settings()
+	audio.sync_settings()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
 
 func _apply_behavior_visuals() -> void:
 	if is_instance_valid(frog):
@@ -159,6 +181,7 @@ func _update_mouse_region() -> void:
 
 func _on_swarm_activity_finished() -> void:
 	_update_mouse_region()
+	_refresh_menu_state()
 
 func _set_window_position(target_position: Vector2) -> void:
 	DisplayServer.window_set_position(Vector2i(roundi(target_position.x), roundi(target_position.y)), 0)
@@ -195,8 +218,13 @@ func _notification(what: int) -> void:
 func _exit_tree() -> void:
 	_save_settings()
 
-func _apply_menu_state() -> void:
+func _refresh_menu_state() -> void:
 	if not menu:
 		return
-	menu.set_item_checked(menu.get_item_index(6), not PetSettings.antics_enabled)
-	menu.set_item_checked(menu.get_item_index(7), PetSettings.always_on_top)
+	menu.refresh_state(
+		PetSettings.antics_enabled,
+		PetSettings.always_on_top,
+		PetSettings.sound_enabled,
+		PetSettings.sfx_volume,
+		swarm.get_clone_count()
+	)

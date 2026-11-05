@@ -167,7 +167,7 @@ func pointer_release(pointer_position: Vector2) -> void:
 		return
 	var result := _gesture.end(pointer_position)
 	if bool(result["started_drag"]):
-		_start_drag(pointer_position)
+		_start_drag(Vector2(result["drag_origin_position"]))
 	if bool(result["dragging"]):
 		var collided_ids := world.finish_drag(_pointer_id, pointer_position, _all_work_areas())
 		for id in collided_ids:
@@ -251,7 +251,7 @@ func _process(delta: float) -> void:
 		var pointer_position := Vector2(DisplayServer.mouse_get_position())
 		var result := _gesture.advance(pointer_position)
 		if bool(result["started_drag"]):
-			_start_drag(pointer_position)
+			_start_drag(Vector2(result["drag_origin_position"]))
 		if bool(result["dragging"]):
 			world.move_drag(_pointer_id, pointer_position)
 	var collided_ids := world.advance(delta, _all_work_areas())
@@ -303,8 +303,8 @@ func _apply_size(id: int, size: int) -> void:
 	if id != 0:
 		pet_window.call("refresh_menu_state", get_small_pet_count(), collisions_enabled, collision_strength)
 
-func _start_drag(pointer_position: Vector2) -> void:
-	if world.begin_drag(_pointer_id, pointer_position):
+func _start_drag(drag_origin_position: Vector2) -> void:
+	if world.begin_drag(_pointer_id, drag_origin_position):
 		var visual: Node2D = _visuals.get(_pointer_id)
 		if is_instance_valid(visual):
 			visual.call("set_dragging", true)

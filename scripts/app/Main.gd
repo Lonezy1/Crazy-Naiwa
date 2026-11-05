@@ -19,7 +19,7 @@ var fleet: Node
 var settings: Node
 var pointer_held := false
 var dragging := false
-var drag_offset := Vector2i.ZERO
+var drag_offset := Vector2.ZERO
 
 func _ready() -> void:
 	Engine.max_fps = 30
@@ -96,8 +96,6 @@ func _input(event: InputEvent) -> void:
 					pointer_held = true
 					dragging = false
 					var drag_screen_origin := DisplayServer.mouse_get_position()
-					var window_position := get_window().position
-					drag_offset = drag_screen_origin - window_position
 					gesture.begin(Vector2(drag_screen_origin))
 			elif event.pressed and swarm.visible:
 				swarm.kick_near(event.position, Vector2(0.0, -120.0))
@@ -244,7 +242,10 @@ func _on_fleet_activity_changed(active: bool) -> void:
 
 func _handle_gesture_result(result: Dictionary) -> void:
 	if bool(result.get("started_drag", false)):
-		_begin_drag(Vector2(result["position"]))
+		_begin_drag(
+			Vector2(result["position"]),
+			Vector2(result["drag_origin_position"])
+		)
 	if dragging and bool(result.get("dragging", false)):
 		var screen_mouse := Vector2(result["position"])
 		var next_window_position := screen_mouse - Vector2(drag_offset)
@@ -260,11 +261,12 @@ func _handle_gesture_result(result: Dictionary) -> void:
 		_set_window_position(next_window_position)
 		_apply_behavior_visuals()
 
-func _begin_drag(screen_position: Vector2) -> void:
+func _begin_drag(screen_position: Vector2, drag_origin_position: Vector2) -> void:
 	if dragging:
 		return
 	dragging = true
-	behavior.begin_drag(screen_position)
+	drag_offset = drag_origin_position - Vector2(get_window().position)
+	behavior.begin_drag(drag_origin_position)
 	audio.play_effect(PetAudio.Effect.GRAB_START)
 	_apply_behavior_visuals()
 

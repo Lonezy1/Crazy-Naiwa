@@ -75,10 +75,20 @@ func _test_gestures() -> void:
 	gesture.begin(Vector2.ZERO, 0.0)
 	var early_move := gesture.update(Vector2(40.0, 0.0), 0.2)
 	_expect(not early_move["dragging"], "movement before the hold threshold does not drag")
-	var held_move := gesture.update(Vector2(60.0, 0.0), 0.46)
-	_expect(held_move["dragging"], "long press followed by movement starts a drag")
-	_expect(held_move["started_drag"], "gesture reports the drag transition once")
-	var release := gesture.end(Vector2(180.0, 0.0), 0.50)
+	var held_move := gesture.update(Vector2(60.0, 0.0), 0.31)
+	_expect(not held_move["dragging"], "movement accumulated before the hold threshold is ignored")
+	var post_hold_move := gesture.update(Vector2(72.0, 0.0), 0.34)
+	_expect(post_hold_move["dragging"], "movement after the hold threshold starts a drag")
+	_expect(post_hold_move["started_drag"], "gesture reports the drag transition once")
+	_expect(
+		post_hold_move["drag_origin_position"] == Vector2(60.0, 0.0),
+		"drag anchor resets after the hold threshold"
+	)
+	_expect(
+		Vector2(post_hold_move["position"]).x - Vector2(post_hold_move["drag_origin_position"]).x == 12.0,
+		"post-hold movement remains continuous without including pre-hold movement"
+	)
+	var release := gesture.end(Vector2(180.0, 0.0), 0.36)
 	_expect(release["dragging"], "gesture release preserves drag classification")
 	_expect(Vector2(release["release_velocity"]).length() >= PetBehavior.THROW_SPEED_THRESHOLD, "recent pointer samples detect a fast flick")
 	_expect(gesture.phase == PetGesture.Phase.IDLE, "gesture resets after release")

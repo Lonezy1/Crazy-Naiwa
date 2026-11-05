@@ -3,15 +3,16 @@ extends RefCounted
 ## Mouse gesture classifier shared by the window input layer and tests.
 ## It deliberately does not move the window or mutate behavior state.
 
-enum Phase { IDLE, PRESSED, DRAGGING }
+enum Phase { IDLE, PRESSED, ARMED, DRAGGING }
 
-const HOLD_THRESHOLD_SECONDS := 0.45
+const HOLD_THRESHOLD_SECONDS := 0.3
 const MOVE_THRESHOLD_PIXELS := 10.0
 const VELOCITY_WINDOW_SECONDS := 0.12
 
 var phase := Phase.IDLE
 var press_position := Vector2.ZERO
 var current_position := Vector2.ZERO
+var _drag_origin_position := Vector2.ZERO
 var press_time := 0.0
 var _samples: Array[Dictionary] = []
 
@@ -33,8 +34,11 @@ func update(position: Vector2, timestamp: float = -1.0) -> Dictionary:
 	var started_drag := false
 	if phase == Phase.PRESSED:
 		var held_long_enough := now - press_time >= HOLD_THRESHOLD_SECONDS
-		var moved_far_enough := position.distance_to(press_position) >= MOVE_THRESHOLD_PIXELS
-		if held_long_enough and moved_far_enough:
+		if held_long_enough:
+			phase = Phase.ARMED
+			_drag_origin_position = position
+	elif phase == Phase.ARMED:
+		if position.distance_to(_drag_origin_position) >= MOVE_THRESHOLD_PIXELS:
 			phase = Phase.DRAGGING
 			started_drag = true
 	return _result(started_drag, now)
@@ -52,6 +56,7 @@ func end(position: Vector2, timestamp: float = -1.0) -> Dictionary:
 		"dragging": was_dragging,
 		"started_drag": bool(update_result["started_drag"]),
 		"position": current_position,
+		"drag_origin_position": _drag_origin_position,
 		"duration": now - press_time,
 		"total": current_position - press_position,
 		"release_velocity": _estimate_velocity(),
@@ -68,6 +73,7 @@ func _result(started_drag: bool, timestamp: float) -> Dictionary:
 		"dragging": phase == Phase.DRAGGING,
 		"started_drag": started_drag,
 		"position": current_position,
+		"drag_origin_position": _drag_origin_position,
 		"duration": timestamp - press_time,
 		"total": current_position - press_position,
 		"release_velocity": _estimate_velocity(),
@@ -78,6 +84,7 @@ func _empty_result() -> Dictionary:
 		"dragging": false,
 		"started_drag": false,
 		"position": current_position,
+		"drag_origin_position": current_position,
 		"duration": 0.0,
 		"total": Vector2.ZERO,
 		"release_velocity": Vector2.ZERO,

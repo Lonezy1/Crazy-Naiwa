@@ -37,6 +37,11 @@ func _ready() -> void:
 	_restore_window_position()
 	behavior.set_enabled(settings.antics_enabled)
 	behavior.initialize(Vector2(pet_window.position))
+	behavior.set_throw_physics(
+		settings.throw_damping,
+		settings.throw_gravity_scale,
+		settings.throw_bounce
+	)
 	swarm.set_simulation_enabled(settings.antics_enabled)
 	audio = PetAudio.new()
 	audio.name = "PetAudio"
@@ -150,6 +155,7 @@ func _build_menu() -> void:
 	menu.volume_selected.connect(_on_menu_volume_selected)
 	menu.long_press_mode_selected.connect(_on_long_press_mode_selected)
 	menu.throw_strength_selected.connect(_on_throw_strength_selected)
+	menu.throw_tuning_selected.connect(_on_throw_tuning_selected)
 	menu.fleet_command_selected.connect(_on_fleet_command_selected)
 	menu.size_selected.connect(_on_frog_size_selected)
 	menu.collision_enabled_selected.connect(_on_collision_enabled_selected)
@@ -224,6 +230,23 @@ func _on_long_press_mode_selected(mode: int) -> void:
 
 func _on_throw_strength_selected(value: float) -> void:
 	settings.throw_strength = value
+	settings.save_settings()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
+func _on_throw_tuning_selected(tuning: int, value: float) -> void:
+	match tuning:
+		PetSettingsStore.ThrowTuning.DAMPING:
+			settings.throw_damping = value
+		PetSettingsStore.ThrowTuning.GRAVITY_SCALE:
+			settings.throw_gravity_scale = value
+		PetSettingsStore.ThrowTuning.BOUNCE:
+			settings.throw_bounce = value
+	behavior.set_throw_physics(
+		settings.throw_damping,
+		settings.throw_gravity_scale,
+		settings.throw_bounce
+	)
 	settings.save_settings()
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)

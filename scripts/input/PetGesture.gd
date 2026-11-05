@@ -16,6 +16,7 @@ var press_position := Vector2.ZERO
 var current_position := Vector2.ZERO
 var _drag_origin_position := Vector2.ZERO
 var press_time := 0.0
+var _last_motion_time := 0.0
 var _samples: Array[Dictionary] = []
 
 func begin(position: Vector2, timestamp: float = -1.0) -> void:
@@ -24,6 +25,7 @@ func begin(position: Vector2, timestamp: float = -1.0) -> void:
 	press_position = position
 	current_position = position
 	press_time = now
+	_last_motion_time = now
 	_samples.clear()
 	_samples.append({"position": position, "time": now})
 
@@ -67,6 +69,7 @@ func end(position: Vector2, timestamp: float = -1.0) -> Dictionary:
 
 func reset() -> void:
 	phase = Phase.IDLE
+	_last_motion_time = 0.0
 	_samples.clear()
 
 func _result(started_drag: bool, timestamp: float) -> Dictionary:
@@ -94,8 +97,8 @@ func _empty_result() -> Dictionary:
 	}
 
 func _record_sample(position: Vector2, timestamp: float) -> void:
-	if not _samples.is_empty() and Vector2(_samples[-1]["position"]).is_equal_approx(position):
-		return
+	if not _samples.is_empty() and not Vector2(_samples[-1]["position"]).is_equal_approx(position):
+		_last_motion_time = timestamp
 	_samples.append({"position": position, "time": timestamp})
 	var cutoff := timestamp - VELOCITY_WINDOW_SECONDS
 	while _samples.size() > 2 and float(_samples[0]["time"]) < cutoff:
@@ -104,23 +107,24 @@ func _record_sample(position: Vector2, timestamp: float) -> void:
 func _estimate_velocity(reference_time: float) -> Vector2:
 	if _samples.size() < 2:
 		return Vector2.ZERO
-	var latest_time := float(_samples[-1]["time"])
-	if reference_time - latest_time > VELOCITY_WINDOW_SECONDS:
+	if reference_time - _last_motion_time > VELOCITY_WINDOW_SECONDS:
 		return Vector2.ZERO
-	return _average_velocity_between(latest_time - VELOCITY_WINDOW_SECONDS, latest_time)
+	return _average_velocity_between(
+		_last_motion_time - VELOCITY_WINDOW_SECONDS,
+		_last_motion_time
+	)
 
 func _estimate_acceleration(reference_time: float) -> Vector2:
 	if _samples.size() < 3:
 		return Vector2.ZERO
-	var latest_time := float(_samples[-1]["time"])
-	if reference_time - latest_time > VELOCITY_WINDOW_SECONDS:
+	if reference_time - _last_motion_time > VELOCITY_WINDOW_SECONDS:
 		return Vector2.ZERO
-	var midpoint := latest_time - ACCELERATION_WINDOW_SECONDS * 0.5
+	var midpoint := _last_motion_time - ACCELERATION_WINDOW_SECONDS * 0.5
 	var previous_velocity := _average_velocity_between(
 		midpoint - ACCELERATION_WINDOW_SECONDS,
 		midpoint
 	)
-	var recent_velocity := _average_velocity_between(midpoint, latest_time)
+	var recent_velocity := _average_velocity_between(midpoint, _last_motion_time)
 	return ((recent_velocity - previous_velocity) / ACCELERATION_WINDOW_SECONDS).limit_length(
 		MAX_ESTIMATED_ACCELERATION
 	)
@@ -137,7 +141,10 @@ func _average_velocity_between(start_time: float, end_time: float) -> Vector2:
 		var segment_midpoint := (segment_start + segment_end) * 0.5
 		if segment_delta <= 0.000001 or segment_midpoint < start_time or segment_midpoint > end_time:
 			continue
-		distance += Vector2(current["position"]) - Vector2(previous["position"])
+		var segment_distance: Vector2 = Vector2(current["position"]) - Vector2(previous["position"])
+		if segment_distance.is_zero_approx():
+			continue
+		distance += segment_distance
 		elapsed += segment_delta
 	if elapsed <= 0.000001:
 		return Vector2.ZERO

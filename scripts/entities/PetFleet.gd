@@ -206,7 +206,10 @@ func refresh_menu(menu: PetContextMenu, clone_count: int = 0) -> void:
 		collisions_enabled,
 		collision_strength,
 		get_small_pet_count() < MAX_SMALL_PETS,
-		_settings.throw_strength
+		_settings.throw_strength,
+		_settings.throw_damping,
+		_settings.throw_gravity_scale,
+		_settings.throw_bounce
 	)
 
 func persist_state() -> void:

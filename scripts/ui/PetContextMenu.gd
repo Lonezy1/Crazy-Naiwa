@@ -17,6 +17,9 @@ enum Command {
 	SFX_VOLUME,
 	LONG_PRESS_MODE,
 	THROW_STRENGTH,
+	THROW_DAMPING,
+	THROW_GRAVITY,
+	THROW_BOUNCE,
 	SPAWN_SMALL_PET,
 	CLEAR_SMALL_PETS,
 	REMOVE_THIS_PET,
@@ -50,6 +53,7 @@ signal setting_selected(setting: int, enabled: bool)
 signal volume_selected(value: float)
 signal long_press_mode_selected(mode: int)
 signal throw_strength_selected(value: float)
+signal throw_tuning_selected(tuning: int, value: float)
 signal fleet_command_selected(command: int)
 signal size_selected(size: int)
 signal collision_enabled_selected(enabled: bool)
@@ -69,8 +73,10 @@ const VOLUME_OPTIONS := [
 var volume_menu: PopupMenu
 var long_press_menu: PopupMenu
 var throw_strength_menu: PopupMenu
+var throw_tuning_menus: Dictionary = {}
 var size_menu: PopupMenu
 var collision_menu: PopupMenu
+var _command_menus: Dictionary = {}
 var _antics_enabled := true
 var _always_on_top := true
 var _sound_enabled := true
@@ -94,7 +100,10 @@ func refresh_state(
 	collisions_enabled: bool = true,
 	collision_strength: float = 1.0,
 	can_spawn: bool = true,
-	throw_strength: float = PetSettingsStore.DEFAULT_THROW_STRENGTH
+	throw_strength: float = PetSettingsStore.DEFAULT_THROW_STRENGTH,
+	throw_damping: float = PetSettingsStore.DEFAULT_THROW_DAMPING,
+	throw_gravity_scale: float = PetSettingsStore.DEFAULT_THROW_GRAVITY_SCALE,
+	throw_bounce: float = PetSettingsStore.DEFAULT_THROW_BOUNCE
 ) -> void:
 	_antics_enabled = antics_enabled
 	_always_on_top = always_on_top
@@ -108,6 +117,9 @@ func refresh_state(
 		_set_volume_checked(sfx_volume)
 		_set_long_press_mode_checked(long_press_mode)
 		_set_throw_strength_checked(throw_strength)
+		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.DAMPING, throw_damping)
+		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.GRAVITY_SCALE, throw_gravity_scale)
+		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.BOUNCE, throw_bounce)
 	if size_menu:
 		_set_size_checked(frog_size)
 	if collision_menu:
@@ -120,39 +132,65 @@ func refresh_state(
 
 func _build_items() -> void:
 	if fleet_only:
-		add_item("小奶蛙 0 / 100", Command.FLEET_STATUS)
-		add_icon_item(PetTheme.menu_icon(3), "生小奶蛙", Command.SPAWN_SMALL_PET)
-		add_icon_item(PetTheme.menu_icon(4), "清理全部小奶蛙", Command.CLEAR_SMALL_PETS)
-		add_icon_item(PetTheme.menu_icon(9), "退出这只奶蛙", Command.REMOVE_THIS_PET)
-		add_check_item("奶蛙间碰撞", Command.COLLISION_ENABLED)
-		_build_size_menu()
-		_build_collision_menu()
+		_build_fleet_items()
 		return
-	add_icon_item(PetTheme.menu_icon(0), "DVD 弹跳", Command.DVD_BOUNCE)
-	add_icon_item(PetTheme.menu_icon(1), "立即蛄蛹", Command.SLITHER)
-	add_icon_item(PetTheme.menu_icon(2), "顶端坠落", Command.FLOAT_FALL)
-	add_separator()
-	add_icon_item(PetTheme.menu_icon(3), "召唤 50 只分身", Command.SPAWN_CLONES)
-	add_icon_item(PetTheme.menu_icon(4), "清理分身", Command.CLEAR_CLONES)
-	add_icon_item(PetTheme.menu_icon(3), "生小奶蛙", Command.SPAWN_SMALL_PET)
-	add_icon_item(PetTheme.menu_icon(4), "清理全部小奶蛙", Command.CLEAR_SMALL_PETS)
-	add_item("小奶蛙 0 / 100", Command.FLEET_STATUS)
-	add_check_item("奶蛙间碰撞", Command.COLLISION_ENABLED)
-	add_separator()
-	add_icon_check_item(PetTheme.menu_icon(7), "暂停整活", Command.TOGGLE_ANTICS)
-	add_icon_check_item(PetTheme.menu_icon(8), "始终置顶", Command.TOGGLE_ALWAYS_ON_TOP)
-	add_icon_check_item(PetTheme.menu_icon(10), "音效", Command.TOGGLE_SOUND)
+	var behavior_menu := _build_group("行为", "BehaviorMenu", 0)
+	_add_item(behavior_menu, "DVD 弹跳", Command.DVD_BOUNCE)
+	_add_item(behavior_menu, "立即蛄蛹", Command.SLITHER)
+	_add_item(behavior_menu, "顶端坠落", Command.FLOAT_FALL)
+	_add_item(behavior_menu, "回到屏幕右下角", Command.MOVE_TO_CORNER)
 
-	volume_menu = PopupMenu.new()
-	volume_menu.name = "SfxVolumeMenu"
-	volume_menu.theme = theme
-	for option: Dictionary in VOLUME_OPTIONS:
-		volume_menu.add_radio_check_item(option["label"], option["id"])
-	volume_menu.id_pressed.connect(_on_volume_id_pressed)
-	add_child(volume_menu)
-	add_submenu_item("音效音量", volume_menu.name, Command.SFX_VOLUME)
-	set_item_icon(get_item_index(Command.SFX_VOLUME), PetTheme.menu_icon(5))
+	_build_throw_menu()
 
+	var fleet_menu := _build_group("分身与碰撞", "FleetMenu", 3)
+	_add_item(fleet_menu, "召唤 50 只分身", Command.SPAWN_CLONES)
+	_add_item(fleet_menu, "清理分身", Command.CLEAR_CLONES)
+	_add_item(fleet_menu, "生小奶蛙", Command.SPAWN_SMALL_PET)
+	_add_item(fleet_menu, "清理全部小奶蛙", Command.CLEAR_SMALL_PETS)
+	_add_item(fleet_menu, "小奶蛙 0 / 100", Command.FLEET_STATUS)
+	_add_check_item(fleet_menu, "奶蛙间碰撞", Command.COLLISION_ENABLED)
+	_build_collision_menu(fleet_menu)
+
+	_build_preferences_menu()
+	add_separator()
+	_add_item(self, "退出奶蛙", Command.QUIT, 9)
+
+func _build_fleet_items() -> void:
+	var current_menu := _build_group("当前奶蛙", "CurrentPetMenu", 3)
+	_add_item(current_menu, "生小奶蛙", Command.SPAWN_SMALL_PET)
+	_add_item(current_menu, "清理全部小奶蛙", Command.CLEAR_SMALL_PETS)
+	_build_size_menu(current_menu)
+
+	var fleet_menu := _build_group("分身与碰撞", "FleetMenu", 4)
+	_add_item(fleet_menu, "小奶蛙 0 / 100", Command.FLEET_STATUS)
+	_add_check_item(fleet_menu, "奶蛙间碰撞", Command.COLLISION_ENABLED)
+	_build_collision_menu(fleet_menu)
+	add_separator()
+	_add_item(self, "退出这只奶蛙", Command.REMOVE_THIS_PET, 9)
+
+func _build_group(label: String, menu_name: String, icon_index: int) -> PopupMenu:
+	var group_menu := PopupMenu.new()
+	group_menu.name = menu_name
+	group_menu.theme = theme
+	group_menu.id_pressed.connect(_on_menu_id_pressed)
+	add_child(group_menu)
+	add_submenu_item(label, group_menu.name, -1)
+	set_item_icon(get_item_count() - 1, PetTheme.menu_icon(icon_index))
+	return group_menu
+
+func _add_item(target_menu: PopupMenu, label: String, command: int, icon_index: int = -1) -> void:
+	if icon_index >= 0:
+		target_menu.add_icon_item(PetTheme.menu_icon(icon_index), label, command)
+	else:
+		target_menu.add_item(label, command)
+	_command_menus[command] = target_menu
+
+func _add_check_item(target_menu: PopupMenu, label: String, command: int) -> void:
+	target_menu.add_check_item(label, command)
+	_command_menus[command] = target_menu
+
+func _build_throw_menu() -> void:
+	var throw_menu := _build_group("甩动手感", "ThrowMenu", 1)
 	long_press_menu = PopupMenu.new()
 	long_press_menu.name = "LongPressModeMenu"
 	long_press_menu.theme = theme
@@ -160,8 +198,7 @@ func _build_items() -> void:
 	long_press_menu.add_radio_check_item("甩动整活", LongPressOption.TOSS)
 	long_press_menu.id_pressed.connect(_on_long_press_mode_id_pressed)
 	add_child(long_press_menu)
-	add_submenu_item("长按模式", long_press_menu.name, Command.LONG_PRESS_MODE)
-	set_item_icon(get_item_index(Command.LONG_PRESS_MODE), PetTheme.menu_icon(1))
+	_add_submenu(throw_menu, "长按模式", long_press_menu, Command.LONG_PRESS_MODE)
 
 	throw_strength_menu = PopupMenu.new()
 	throw_strength_menu.name = "ThrowStrengthMenu"
@@ -171,20 +208,61 @@ func _build_items() -> void:
 		throw_strength_menu.add_radio_check_item("%d%%" % roundi(strength * 100.0), 50 + index)
 	throw_strength_menu.id_pressed.connect(_on_throw_strength_id_pressed)
 	add_child(throw_strength_menu)
-	add_submenu_item("甩飞力度", throw_strength_menu.name, Command.THROW_STRENGTH)
-	set_item_icon(get_item_index(Command.THROW_STRENGTH), PetTheme.menu_icon(0))
+	_add_submenu(throw_menu, "甩飞力度", throw_strength_menu, Command.THROW_STRENGTH)
 
-	_build_size_menu()
-	_build_collision_menu()
-	add_submenu_item("反弹强度", collision_menu.name, Command.COLLISION_STRENGTH)
-	set_item_icon(get_item_index(Command.COLLISION_STRENGTH), PetTheme.menu_icon(2))
+	_build_throw_tuning_menu(
+		throw_menu,
+		PetSettingsStore.ThrowTuning.DAMPING,
+		Command.THROW_DAMPING,
+		"甩飞阻尼",
+		"ThrowDampingMenu",
+		PetSettingsStore.THROW_DAMPING_OPTIONS
+	)
+	_build_throw_tuning_menu(
+		throw_menu,
+		PetSettingsStore.ThrowTuning.GRAVITY_SCALE,
+		Command.THROW_GRAVITY,
+		"甩飞重力",
+		"ThrowGravityMenu",
+		PetSettingsStore.THROW_GRAVITY_SCALE_OPTIONS,
+		true
+	)
+	_build_throw_tuning_menu(
+		throw_menu,
+		PetSettingsStore.ThrowTuning.BOUNCE,
+		Command.THROW_BOUNCE,
+		"边缘回弹",
+		"ThrowBounceMenu",
+		PetSettingsStore.THROW_BOUNCE_OPTIONS,
+		true,
+		true
+	)
 
-	if fleet_only:
-		set_item_disabled(get_item_index(Command.SPAWN_CLONES), true)
-		set_item_disabled(get_item_index(Command.CLEAR_CLONES), true)
-	add_separator()
-	add_icon_item(PetTheme.menu_icon(6), "回到屏幕右下角", Command.MOVE_TO_CORNER)
-	add_icon_item(PetTheme.menu_icon(9), "退出奶蛙", Command.QUIT)
+func _build_preferences_menu() -> void:
+	var preference_menu := _build_group("偏好设置", "PreferencesMenu", 7)
+	_add_check_item(preference_menu, "暂停整活", Command.TOGGLE_ANTICS)
+	_add_check_item(preference_menu, "始终置顶", Command.TOGGLE_ALWAYS_ON_TOP)
+	_add_check_item(preference_menu, "音效", Command.TOGGLE_SOUND)
+	_build_size_menu(preference_menu)
+	volume_menu = PopupMenu.new()
+	volume_menu.name = "SfxVolumeMenu"
+	volume_menu.theme = theme
+	for option: Dictionary in VOLUME_OPTIONS:
+		volume_menu.add_radio_check_item(option["label"], option["id"])
+	volume_menu.id_pressed.connect(_on_volume_id_pressed)
+	add_child(volume_menu)
+	_add_submenu(preference_menu, "音效音量", volume_menu, Command.SFX_VOLUME)
+
+func _add_submenu(parent_menu: PopupMenu, label: String, child_menu: PopupMenu, command: int) -> void:
+	var old_parent := child_menu.get_parent()
+	if old_parent != parent_menu:
+		if old_parent:
+			old_parent.remove_child(child_menu)
+		parent_menu.add_child(child_menu)
+	parent_menu.add_submenu_item(label, child_menu.name, command)
+	_command_menus[command] = parent_menu
+
+
 
 func _on_menu_id_pressed(id: int) -> void:
 	match id:
@@ -204,6 +282,8 @@ func _on_menu_id_pressed(id: int) -> void:
 			collision_enabled_selected.emit(_collision_enabled)
 		Command.COLLISION_STRENGTH:
 			command_selected.emit(id)
+		Command.THROW_DAMPING, Command.THROW_GRAVITY, Command.THROW_BOUNCE:
+			pass
 		_:
 			command_selected.emit(id)
 
@@ -221,6 +301,13 @@ func _on_throw_strength_id_pressed(id: int) -> void:
 	var option_index := id - 50
 	if option_index >= 0 and option_index < PetSettingsStore.THROW_STRENGTH_OPTIONS.size():
 		throw_strength_selected.emit(PetSettingsStore.THROW_STRENGTH_OPTIONS[option_index])
+
+func _on_throw_tuning_id_pressed(id: int, tuning: int) -> void:
+	var tuning_menu: PopupMenu = throw_tuning_menus.get(tuning, {}).get("menu")
+	var options: Array = throw_tuning_menus.get(tuning, {}).get("options", [])
+	if tuning_menu == null or id < 0 or id >= options.size():
+		return
+	throw_tuning_selected.emit(tuning, float(options[id]))
 
 func _on_size_id_pressed(id: int) -> void:
 	if id in SIZE_OPTIONS:
@@ -258,6 +345,41 @@ func _set_throw_strength_checked(value: float) -> void:
 			is_equal_approx(strength, value)
 		)
 
+func _set_throw_tuning_checked(tuning: int, value: float) -> void:
+	var entry: Dictionary = throw_tuning_menus.get(tuning, {})
+	var tuning_menu: PopupMenu = entry.get("menu")
+	var options: Array = entry.get("options", [])
+	if tuning_menu == null:
+		return
+	for index in range(options.size()):
+		tuning_menu.set_item_checked(index, is_equal_approx(float(options[index]), value))
+
+func _build_throw_tuning_menu(
+	parent_menu: PopupMenu,
+	tuning: int,
+	command: int,
+	label: String,
+	menu_name: String,
+	options: Array,
+	show_percent: bool = false,
+	show_off: bool = false
+) -> void:
+	var tuning_menu := PopupMenu.new()
+	tuning_menu.name = menu_name
+	tuning_menu.theme = theme
+	for index in range(options.size()):
+		var value := float(options[index])
+		var option_label := "%.1f" % value
+		if show_percent:
+			option_label = "%d%%" % roundi(value * 100.0)
+		if show_off and is_zero_approx(value):
+			option_label = "关闭"
+		tuning_menu.add_radio_check_item(option_label, index)
+	tuning_menu.id_pressed.connect(_on_throw_tuning_id_pressed.bind(tuning))
+	add_child(tuning_menu)
+	throw_tuning_menus[tuning] = {"menu": tuning_menu, "options": options}
+	_add_submenu(parent_menu, label, tuning_menu, command)
+
 func _set_size_checked(value: int) -> void:
 	for size in SIZE_OPTIONS:
 		size_menu.set_item_checked(size_menu.get_item_index(size), size == value)
@@ -269,7 +391,7 @@ func _set_collision_checked(strength: float) -> void:
 			is_equal_approx(COLLISION_STRENGTH_OPTIONS[index], strength)
 		)
 
-func _build_size_menu() -> void:
+func _build_size_menu(parent_menu: PopupMenu) -> void:
 	size_menu = PopupMenu.new()
 	size_menu.name = "FrogSizeMenu"
 	size_menu.theme = theme
@@ -277,10 +399,9 @@ func _build_size_menu() -> void:
 		size_menu.add_radio_check_item("%dpx" % size, size)
 	size_menu.id_pressed.connect(_on_size_id_pressed)
 	add_child(size_menu)
-	add_submenu_item("大小", size_menu.name, Command.FROG_SIZE)
-	set_item_icon(get_item_index(Command.FROG_SIZE), PetTheme.menu_icon(7))
+	_add_submenu(parent_menu, "大小", size_menu, Command.FROG_SIZE)
 
-func _build_collision_menu() -> void:
+func _build_collision_menu(parent_menu: PopupMenu) -> void:
 	collision_menu = PopupMenu.new()
 	collision_menu.name = "CollisionMenu"
 	collision_menu.theme = theme
@@ -288,20 +409,22 @@ func _build_collision_menu() -> void:
 		collision_menu.add_radio_check_item("反弹强度 %d%%" % roundi(COLLISION_STRENGTH_OPTIONS[index] * 100.0), 10 + index)
 	collision_menu.id_pressed.connect(_on_collision_id_pressed)
 	add_child(collision_menu)
-	add_submenu_item("反弹强度", collision_menu.name, Command.COLLISION_STRENGTH)
-	set_item_icon(get_item_index(Command.COLLISION_STRENGTH), PetTheme.menu_icon(2))
+	_add_submenu(parent_menu, "反弹强度", collision_menu, Command.COLLISION_STRENGTH)
 
 func _set_checked(command: int, checked: bool) -> void:
-	var index := get_item_index(command)
+	var target_menu: PopupMenu = _command_menus.get(command, self)
+	var index := target_menu.get_item_index(command)
 	if index >= 0:
-		set_item_checked(index, checked)
+		target_menu.set_item_checked(index, checked)
 
 func _set_disabled(command: int, disabled: bool) -> void:
-	var index := get_item_index(command)
+	var target_menu: PopupMenu = _command_menus.get(command, self)
+	var index := target_menu.get_item_index(command)
 	if index >= 0:
-		set_item_disabled(index, disabled)
+		target_menu.set_item_disabled(index, disabled)
 
 func _set_text(command: int, text_value: String) -> void:
-	var index := get_item_index(command)
+	var target_menu: PopupMenu = _command_menus.get(command, self)
+	var index := target_menu.get_item_index(command)
 	if index >= 0:
-		set_item_text(index, text_value)
+		target_menu.set_item_text(index, text_value)

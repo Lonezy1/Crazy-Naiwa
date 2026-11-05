@@ -9,6 +9,7 @@ const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetSwarm = preload("res://scripts/entities/PetSwarm.gd")
 const PetAudio = preload("res://scripts/audio/PetAudio.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
+const PetTheme = preload("res://scripts/ui/PetTheme.gd")
 const PetCollisionWorld = preload("res://scripts/entities/PetCollisionWorld.gd")
 const FrogTexture: Texture2D = preload("res://assets/character/stand.png")
 
@@ -43,6 +44,9 @@ func _test_settings() -> void:
 	saved.sfx_volume = 0.25
 	saved.long_press_mode = PetSettingsStore.LongPressMode.TOSS
 	saved.throw_strength = 1.8
+	saved.throw_damping = 6.0
+	saved.throw_gravity_scale = 1.25
+	saved.throw_bounce = 0.35
 	saved.frog_size = 544
 	saved.collisions_enabled = false
 	saved.collision_strength = 1.15
@@ -60,6 +64,9 @@ func _test_settings() -> void:
 	_expect(is_equal_approx(loaded.sfx_volume, 0.25), "settings preserve sfx_volume")
 	_expect(loaded.long_press_mode == PetSettingsStore.LongPressMode.TOSS, "settings preserve long press mode")
 	_expect(is_equal_approx(loaded.throw_strength, 1.8), "settings preserve throw strength")
+	_expect(is_equal_approx(loaded.throw_damping, 6.0), "settings preserve throw damping")
+	_expect(is_equal_approx(loaded.throw_gravity_scale, 1.25), "settings preserve throw gravity scale")
+	_expect(is_equal_approx(loaded.throw_bounce, 0.35), "settings preserve throw bounce")
 	_expect(loaded.frog_size == 544, "settings preserve primary frog size")
 	_expect(not loaded.collisions_enabled, "settings preserve collision toggle")
 	_expect(is_equal_approx(loaded.collision_strength, 1.15), "settings preserve collision strength")
@@ -150,19 +157,50 @@ func _test_audio_and_menu() -> void:
 	await process_frame
 	_expect(not menu.visible, "context menu stays hidden until requested")
 	menu.refresh_state(false, true, false, 0.25, 0, PetSettingsStore.LongPressMode.MOVE)
-	_expect(menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu marks paused state")
-	_expect(menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ALWAYS_ON_TOP)), "menu marks always-on-top state")
-	_expect(not menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_SOUND)), "menu marks muted state")
-	_expect(menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu disables empty clone cleanup")
+	var preferences_menu: PopupMenu = menu.get_node("PreferencesMenu")
+	var fleet_menu: PopupMenu = menu.get_node("FleetMenu")
+	var throw_group: PopupMenu = menu.get_node("ThrowMenu")
+	var hover_style := menu.theme.get_stylebox("hover", "PopupMenu") as StyleBoxFlat
+	var throw_damping_row := throw_group.get_item_index(PetContextMenu.Command.THROW_DAMPING)
+	_expect(
+		preferences_menu.theme == menu.theme and fleet_menu.theme == menu.theme and throw_group.theme == menu.theme,
+		"all folded menus share the context menu theme"
+	)
+	_expect(
+		menu.theme.get_color("font_color", "PopupMenu") == PetTheme.INK
+			and hover_style.bg_color == PetTheme.HOVER,
+		"folded menus reuse the established text and hover colors"
+	)
+	_expect(preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu marks paused state")
+	_expect(preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_ALWAYS_ON_TOP)), "menu marks always-on-top state")
+	_expect(not preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_SOUND)), "menu marks muted state")
+	_expect(fleet_menu.is_item_disabled(fleet_menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu disables empty clone cleanup")
+	_expect(menu.get_item_count() <= 6, "main context menu folds detailed commands under four groups")
 	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.QUARTER)), "volume submenu reflects selected level")
 	_expect(menu.long_press_menu.is_item_checked(menu.long_press_menu.get_item_index(PetContextMenu.LongPressOption.MOVE)), "long press menu marks move mode")
 	_expect(
 		menu.throw_strength_menu.is_item_checked(menu.throw_strength_menu.get_item_index(53)),
 		"throw strength menu reflects the default setting"
 	)
+	menu.refresh_state(
+		true, true, true, 0.5, 0, PetSettingsStore.LongPressMode.MOVE,
+		320, 0, true, 1.0, true, 1.5, 6.0, 1.25, 0.35
+	)
+	_expect(
+		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.DAMPING]["menu"].is_item_checked(3),
+		"throw damping menu reflects the selected value"
+	)
+	_expect(
+		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.GRAVITY_SCALE]["menu"].is_item_checked(3),
+		"throw gravity menu reflects the selected value"
+	)
+	_expect(
+		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.BOUNCE]["menu"].is_item_checked(1),
+		"throw bounce menu reflects the selected value"
+	)
 	menu.refresh_state(true, false, true, 0.5, 50, PetSettingsStore.LongPressMode.TOSS)
-	_expect(not menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu reflects resumed state")
-	_expect(not menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu enables clone cleanup when clones exist")
+	_expect(not preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu reflects resumed state")
+	_expect(not fleet_menu.is_item_disabled(fleet_menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu enables clone cleanup when clones exist")
 	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.HALF)), "volume submenu updates selected level")
 	_expect(menu.long_press_menu.is_item_checked(menu.long_press_menu.get_item_index(PetContextMenu.LongPressOption.TOSS)), "long press menu marks toss mode")
 	var selected_mode := [-1]
@@ -173,14 +211,27 @@ func _test_audio_and_menu() -> void:
 	menu.throw_strength_selected.connect(func(value: float) -> void: selected_throw_strength[0] = value)
 	menu._on_throw_strength_id_pressed(54)
 	_expect(is_equal_approx(selected_throw_strength[0], 1.8), "throw strength menu emits selected multiplier")
+	var selected_tuning := [-1, 0.0]
+	menu.throw_tuning_selected.connect(func(tuning: int, value: float) -> void:
+		selected_tuning[0] = tuning
+		selected_tuning[1] = value
+	)
+	menu._on_throw_tuning_id_pressed(3, PetSettingsStore.ThrowTuning.DAMPING)
+	_expect(
+		selected_tuning[0] == PetSettingsStore.ThrowTuning.DAMPING and is_equal_approx(selected_tuning[1], 6.0),
+		"throw tuning menu emits its parameter and selected value"
+	)
+	_expect(throw_group.get_item_count() == 5, "throw controls are grouped into one expandable submenu")
+	_expect(throw_group.get_item_icon(throw_damping_row) == null, "detailed throw controls avoid redundant row icons")
 	menu.queue_free()
 	var pet_menu := PetContextMenu.new()
 	pet_menu.fleet_only = true
 	root.add_child(pet_menu)
 	await process_frame
 	pet_menu.refresh_state(true, true, true, 0.5, 0, PetSettingsStore.LongPressMode.MOVE, 256, 2, true, 1.0, true)
-	_expect(pet_menu.get_item_index(PetContextMenu.Command.SPAWN_SMALL_PET) >= 0, "small pet menu exposes spawn action")
-	_expect(not pet_menu.is_item_disabled(pet_menu.get_item_index(PetContextMenu.Command.CLEAR_SMALL_PETS)), "small pet menu enables clear action when populated")
+	var current_pet_menu: PopupMenu = pet_menu.get_node("CurrentPetMenu")
+	_expect(current_pet_menu.get_item_index(PetContextMenu.Command.SPAWN_SMALL_PET) >= 0, "small pet menu exposes spawn action")
+	_expect(not current_pet_menu.is_item_disabled(current_pet_menu.get_item_index(PetContextMenu.Command.CLEAR_SMALL_PETS)), "small pet menu enables clear action when populated")
 	_expect(pet_menu.size_menu.is_item_checked(pet_menu.size_menu.get_item_index(320)) == false, "size submenu tracks a non-preset baby size")
 	var selected_size := [0]
 	pet_menu.size_selected.connect(func(value: int) -> void: selected_size[0] = value)
@@ -295,8 +346,82 @@ func _test_behavior() -> void:
 	behavior.end_drag(work_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
 	behavior.advance(0.2, work_area, window_size)
 	_expect(
-		is_equal_approx(behavior.velocity.y, PetBehavior.THROW_GRAVITY * 0.2),
+		is_equal_approx(
+			behavior.velocity.y,
+			PetBehavior.THROW_GRAVITY * 0.2 * exp(-PetBehavior.THROW_LINEAR_DAMPING * 0.2)
+		),
 		"reduced throw gravity keeps the launch airborne longer"
+	)
+	_expect(behavior.window_position.x > 200.0, "fling initial velocity moves the pet a long distance")
+	_expect(
+		behavior.velocity.x < 1200.0 and behavior.velocity.x > 0.0,
+		"inertia damping gradually slows the thrown pet"
+	)
+	var fling_area := Rect2i(0, 0, 10000, 3000)
+	var slow_fling := PetBehavior.new()
+	slow_fling.initialize(Vector2(1000, 500))
+	slow_fling.begin_drag(Vector2.ZERO)
+	slow_fling.end_drag(fling_area, window_size, Vector2(500.0, 0.0), Vector2.ZERO, true, 1.0)
+	var slow_fling_speed := slow_fling.velocity.x
+	var fast_fling := PetBehavior.new()
+	fast_fling.initialize(Vector2(1000, 500))
+	fast_fling.begin_drag(Vector2.ZERO)
+	fast_fling.end_drag(fling_area, window_size, Vector2(3000.0, 0.0), Vector2.ZERO, true, 1.0)
+	var fast_fling_speed := fast_fling.velocity.x
+	fast_fling.advance(0.1, fling_area, window_size)
+	_expect(fast_fling_speed > slow_fling_speed * 4.0, "stronger flicks launch with proportionally higher inertia")
+	_expect(fast_fling.window_position.x > 1300.0, "a strong flick moves the pet far during the initial burst")
+	var early_fling_speed := fast_fling.velocity.x
+	fast_fling.advance(0.2, fling_area, window_size)
+	_expect(fast_fling.velocity.x < early_fling_speed * 0.5, "throw damping quickly eases the initial fling speed")
+	var low_damping_fling := PetBehavior.new()
+	low_damping_fling.initialize(Vector2(1000, 500))
+	low_damping_fling.set_throw_physics(1.5, 1.0, 0.82)
+	low_damping_fling.begin_drag(Vector2.ZERO)
+	low_damping_fling.end_drag(fling_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	low_damping_fling.advance(0.1, fling_area, window_size)
+	var high_damping_fling := PetBehavior.new()
+	high_damping_fling.initialize(Vector2(1000, 500))
+	high_damping_fling.set_throw_physics(8.0, 1.0, 0.82)
+	high_damping_fling.begin_drag(Vector2.ZERO)
+	high_damping_fling.end_drag(fling_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	high_damping_fling.advance(0.1, fling_area, window_size)
+	_expect(
+		low_damping_fling.velocity.x > high_damping_fling.velocity.x,
+		"lower throw damping preserves more horizontal inertia"
+	)
+	var normal_gravity_fling := PetBehavior.new()
+	normal_gravity_fling.initialize(Vector2(1000, 500))
+	normal_gravity_fling.begin_drag(Vector2.ZERO)
+	normal_gravity_fling.end_drag(fling_area, window_size, Vector2(0.0, 1000.0), Vector2.ZERO, true, 1.0)
+	normal_gravity_fling.advance(0.1, fling_area, window_size)
+	var strong_gravity_fling := PetBehavior.new()
+	strong_gravity_fling.initialize(Vector2(1000, 500))
+	strong_gravity_fling.set_throw_physics(4.5, 1.5, 0.82)
+	strong_gravity_fling.begin_drag(Vector2.ZERO)
+	strong_gravity_fling.end_drag(fling_area, window_size, Vector2(0.0, 1000.0), Vector2.ZERO, true, 1.0)
+	strong_gravity_fling.advance(0.1, fling_area, window_size)
+	_expect(
+		strong_gravity_fling.velocity.y > normal_gravity_fling.velocity.y,
+		"throw gravity scale changes vertical acceleration"
+	)
+	var no_bounce_fling := PetBehavior.new()
+	no_bounce_fling.initialize(Vector2(470, 100))
+	no_bounce_fling.set_throw_physics(4.5, 1.0, 0.0)
+	no_bounce_fling.begin_drag(Vector2.ZERO)
+	no_bounce_fling.end_drag(work_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	no_bounce_fling.advance(0.05, work_area, window_size)
+	_expect(
+		no_bounce_fling.window_position.x == 480.0 and is_zero_approx(no_bounce_fling.velocity.x),
+		"zero throw bounce stops horizontal movement at the screen edge"
+	)
+	var bounded_tuning := PetBehavior.new()
+	bounded_tuning.set_throw_physics(99.0, -1.0, 2.0)
+	_expect(
+		is_equal_approx(bounded_tuning.throw_damping, 12.0)
+			and is_equal_approx(bounded_tuning.throw_gravity_scale, 0.25)
+			and is_equal_approx(bounded_tuning.throw_bounce, 1.0),
+		"throw physics clamps values to valid ranges"
 	)
 
 	behavior.set_enabled(false)

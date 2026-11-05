@@ -6,11 +6,13 @@ enum Mode { IDLE, DVD_BOUNCE, SLITHER, FLOAT, FALL, LAUNCH, DRAG }
 
 const MAX_POKE_COUNT := 10
 const THROW_SPEED_THRESHOLD := 360.0
-const MAX_THROW_SPEED := 2100.0
-const THROW_SPEED_SCALE := 1.2
+const MAX_THROW_SPEED := 6000.0
+const THROW_SPEED_SCALE := 1.8
 const THROW_ACCELERATION_WINDOW := 0.055
 const MAX_ACCELERATION_SPEED_BONUS := 700.0
 const THROW_GRAVITY := 540.0
+const THROW_LINEAR_DAMPING := 4.5
+const THROW_BOUNCE := 1.0
 const FLOAT_ASCEND_SPEED := 900.0
 const CONTENT_EDGE_MARGIN := DesktopBounds.CONTENT_EDGE_MARGIN
 
@@ -26,6 +28,9 @@ var corner_flash_seconds := 0.0
 var drag_anchor := Vector2.ZERO
 var drag_total := Vector2.ZERO
 var mode_before_drag := Mode.DVD_BOUNCE
+var throw_damping := THROW_LINEAR_DAMPING
+var throw_gravity_scale := 1.0
+var throw_bounce := THROW_BOUNCE
 
 func initialize(initial_position: Vector2) -> void:
 	window_position = initial_position
@@ -93,12 +98,17 @@ func advance(
 				mode_time = 4.0
 				events.landed = true
 		Mode.LAUNCH:
-			velocity.y += THROW_GRAVITY * delta
+			velocity.y += THROW_GRAVITY * throw_gravity_scale * delta
+			velocity *= exp(-throw_damping * delta)
 			var result := DesktopBounds.advance_bounce(
 				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
 			)
 			window_position = result.position
 			velocity = result.velocity
+			if result.hit_x:
+				velocity.x *= throw_bounce
+			if result.hit_y:
+				velocity.y *= throw_bounce
 			events.corner_hit = result.corner_hit
 			if result.corner_hit:
 				corner_flash_seconds = 1.0
@@ -107,6 +117,11 @@ func advance(
 			if mode_time <= 0.0 or (result.hit_y and absf(velocity.y) < 70.0):
 				_start_dvd_bounce()
 	return events
+
+func set_throw_physics(damping: float, gravity_scale: float, bounce: float) -> void:
+	throw_damping = clampf(damping, 0.5, 12.0)
+	throw_gravity_scale = clampf(gravity_scale, 0.25, 2.0)
+	throw_bounce = clampf(bounce, 0.0, 1.0)
 
 func poke(
 	work_area: Rect2i,

@@ -5,9 +5,12 @@ const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 enum Mode { IDLE, DVD_BOUNCE, SLITHER, FLOAT, FALL, LAUNCH, DRAG }
 
 const MAX_POKE_COUNT := 10
-const THROW_SPEED_THRESHOLD := 720.0
-const MAX_THROW_SPEED := 1100.0
-const THROW_SPEED_SCALE := 0.95
+const THROW_SPEED_THRESHOLD := 360.0
+const MAX_THROW_SPEED := 2100.0
+const THROW_SPEED_SCALE := 1.2
+const THROW_ACCELERATION_WINDOW := 0.055
+const MAX_ACCELERATION_SPEED_BONUS := 700.0
+const THROW_GRAVITY := 540.0
 const FLOAT_ASCEND_SPEED := 900.0
 const CONTENT_EDGE_MARGIN := DesktopBounds.CONTENT_EDGE_MARGIN
 
@@ -90,7 +93,7 @@ func advance(
 				mode_time = 4.0
 				events.landed = true
 		Mode.LAUNCH:
-			velocity.y += 980.0 * delta
+			velocity.y += THROW_GRAVITY * delta
 			var result := DesktopBounds.advance_bounce(
 				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
 			)
@@ -145,7 +148,9 @@ func end_drag(
 	work_area: Rect2i,
 	window_size: Vector2i,
 	release_velocity: Vector2,
+	release_acceleration: Vector2,
 	throw_mode_enabled: bool,
+	throw_strength: float = 1.0,
 	content_rect: Rect2 = Rect2(),
 	edge_margin: float = CONTENT_EDGE_MARGIN
 ) -> Dictionary:
@@ -155,10 +160,20 @@ func end_drag(
 		mode = Mode.IDLE
 		velocity = Vector2.ZERO
 		return {"action": "move"}
-	if release_velocity.length() >= THROW_SPEED_THRESHOLD:
+	var release_speed := release_velocity.length()
+	var launch_direction := release_velocity.normalized()
+	if launch_direction.is_zero_approx():
+		launch_direction = release_acceleration.normalized()
+	var forward_acceleration := maxf(release_acceleration.dot(launch_direction), 0.0)
+	var acceleration_bonus := minf(
+		forward_acceleration * THROW_ACCELERATION_WINDOW,
+		MAX_ACCELERATION_SPEED_BONUS
+	)
+	var launch_speed := (release_speed + acceleration_bonus) * THROW_SPEED_SCALE * clampf(throw_strength, 0.5, 2.0)
+	if launch_speed >= THROW_SPEED_THRESHOLD:
 		mode = Mode.LAUNCH
 		mode_time = 5.0
-		velocity = release_velocity.limit_length(MAX_THROW_SPEED) * THROW_SPEED_SCALE
+		velocity = launch_direction * minf(launch_speed, MAX_THROW_SPEED)
 		return {"action": "throw"}
 	mode = Mode.FALL
 	mode_time = 8.0

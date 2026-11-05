@@ -99,16 +99,17 @@ func finish_drag(id: int, pointer_position: Vector2, work_areas: Array[Rect2i]) 
 	if body.is_empty() or not bool(body["dragged"]):
 		return []
 	move_drag(id, pointer_position)
-	var distance := Vector2(body["drag_target"]).distance_to(Vector2(body["position"]))
-	var minimum_size := float(body["size"])
-	for other in bodies:
-		minimum_size = minf(minimum_size, float(other["size"]))
-	var safe_step := maxf(8.0, minimum_size * 0.35)
-	var steps := clampi(ceili(distance / safe_step), 1, MAX_RELEASE_STEPS)
+	var target: Vector2 = body["drag_target"]
+	var distance := target.distance_to(Vector2(body["position"]))
+	var steps := clampi(ceili(distance / (MAX_DRAG_SPEED * FIXED_STEP)), 1, MAX_RELEASE_STEPS)
 	var collisions: Array[int] = []
 	for _step in range(steps):
-		if Vector2(body["drag_target"]).distance_to(Vector2(body["position"])) <= 0.5:
+		var current: Vector2 = body["position"]
+		var remaining := target - current
+		if remaining.length() <= 0.5:
 			break
+		# Keep release sweeps small enough to preserve contacts along a fast pointer path.
+		body["drag_target"] = current + remaining.limit_length(MAX_DRAG_SPEED * FIXED_STEP)
 		collisions.append_array(_advance_fixed(FIXED_STEP, work_areas))
 	return _unique_ids(collisions)
 
@@ -145,7 +146,7 @@ func _advance_fixed(delta: float, work_areas: Array[Rect2i]) -> Array[int]:
 		minimum_size = minf(minimum_size, float(body["size"]))
 		if bool(body["dragged"]):
 			var desired := Vector2(body["drag_target"])
-			var motion: Vector2 = (desired - Vector2(body["position"])).limit_length(MAX_DRAG_SPEED * delta)
+			var motion: Vector2 = desired - Vector2(body["position"])
 			drag_targets[int(body["id"])] = Vector2(body["position"]) + motion
 			maximum_motion = maxf(maximum_motion, motion.length())
 		else:
@@ -231,8 +232,10 @@ func _resolve_pairs(collided_ids: Array[int]) -> void:
 				var first_size := int(first["size"])
 				var second_size := int(second["size"])
 				var normal_delta := (Vector2(second["position"]) + Vector2.ONE * second_size * 0.5) - (Vector2(first["position"]) + Vector2.ONE * first_size * 0.5)
-				var distance := normal_delta.length()
 				var minimum_distance := maxf(10.0, float(first_size + second_size) * RADIUS_RATIO)
+				if absf(normal_delta.x) >= minimum_distance or absf(normal_delta.y) >= minimum_distance:
+					continue
+				var distance := normal_delta.length()
 				if distance >= minimum_distance:
 					continue
 				var normal := normal_delta / distance if distance > 0.001 else Vector2.RIGHT

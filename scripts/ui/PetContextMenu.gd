@@ -1,6 +1,7 @@
 extends PopupMenu
 
 const PetTheme = preload("res://scripts/ui/PetTheme.gd")
+const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 
 enum Command {
 	DVD_BOUNCE = 1,
@@ -15,6 +16,7 @@ enum Command {
 	TOGGLE_SOUND,
 	SFX_VOLUME,
 	LONG_PRESS_MODE,
+	THROW_STRENGTH,
 	SPAWN_SMALL_PET,
 	CLEAR_SMALL_PETS,
 	REMOVE_THIS_PET,
@@ -47,6 +49,7 @@ signal command_selected(command: int)
 signal setting_selected(setting: int, enabled: bool)
 signal volume_selected(value: float)
 signal long_press_mode_selected(mode: int)
+signal throw_strength_selected(value: float)
 signal fleet_command_selected(command: int)
 signal size_selected(size: int)
 signal collision_enabled_selected(enabled: bool)
@@ -65,6 +68,7 @@ const VOLUME_OPTIONS := [
 
 var volume_menu: PopupMenu
 var long_press_menu: PopupMenu
+var throw_strength_menu: PopupMenu
 var size_menu: PopupMenu
 var collision_menu: PopupMenu
 var _antics_enabled := true
@@ -89,7 +93,8 @@ func refresh_state(
 	small_pet_count: int = 0,
 	collisions_enabled: bool = true,
 	collision_strength: float = 1.0,
-	can_spawn: bool = true
+	can_spawn: bool = true,
+	throw_strength: float = PetSettingsStore.DEFAULT_THROW_STRENGTH
 ) -> void:
 	_antics_enabled = antics_enabled
 	_always_on_top = always_on_top
@@ -102,6 +107,7 @@ func refresh_state(
 	if not fleet_only:
 		_set_volume_checked(sfx_volume)
 		_set_long_press_mode_checked(long_press_mode)
+		_set_throw_strength_checked(throw_strength)
 	if size_menu:
 		_set_size_checked(frog_size)
 	if collision_menu:
@@ -157,6 +163,17 @@ func _build_items() -> void:
 	add_submenu_item("长按模式", long_press_menu.name, Command.LONG_PRESS_MODE)
 	set_item_icon(get_item_index(Command.LONG_PRESS_MODE), PetTheme.menu_icon(1))
 
+	throw_strength_menu = PopupMenu.new()
+	throw_strength_menu.name = "ThrowStrengthMenu"
+	throw_strength_menu.theme = theme
+	for index in range(PetSettingsStore.THROW_STRENGTH_OPTIONS.size()):
+		var strength: float = PetSettingsStore.THROW_STRENGTH_OPTIONS[index]
+		throw_strength_menu.add_radio_check_item("%d%%" % roundi(strength * 100.0), 50 + index)
+	throw_strength_menu.id_pressed.connect(_on_throw_strength_id_pressed)
+	add_child(throw_strength_menu)
+	add_submenu_item("甩飞力度", throw_strength_menu.name, Command.THROW_STRENGTH)
+	set_item_icon(get_item_index(Command.THROW_STRENGTH), PetTheme.menu_icon(0))
+
 	_build_size_menu()
 	_build_collision_menu()
 	add_submenu_item("反弹强度", collision_menu.name, Command.COLLISION_STRENGTH)
@@ -200,6 +217,11 @@ func _on_long_press_mode_id_pressed(id: int) -> void:
 	if id == LongPressOption.MOVE or id == LongPressOption.TOSS:
 		long_press_mode_selected.emit(id)
 
+func _on_throw_strength_id_pressed(id: int) -> void:
+	var option_index := id - 50
+	if option_index >= 0 and option_index < PetSettingsStore.THROW_STRENGTH_OPTIONS.size():
+		throw_strength_selected.emit(PetSettingsStore.THROW_STRENGTH_OPTIONS[option_index])
+
 func _on_size_id_pressed(id: int) -> void:
 	if id in SIZE_OPTIONS:
 		size_selected.emit(id)
@@ -225,6 +247,16 @@ func _set_long_press_mode_checked(value: int) -> void:
 		long_press_menu.get_item_index(LongPressOption.TOSS),
 		value == LongPressOption.TOSS
 	)
+
+func _set_throw_strength_checked(value: float) -> void:
+	if not throw_strength_menu:
+		return
+	for index in range(PetSettingsStore.THROW_STRENGTH_OPTIONS.size()):
+		var strength: float = PetSettingsStore.THROW_STRENGTH_OPTIONS[index]
+		throw_strength_menu.set_item_checked(
+			throw_strength_menu.get_item_index(50 + index),
+			is_equal_approx(strength, value)
+		)
 
 func _set_size_checked(value: int) -> void:
 	for size in SIZE_OPTIONS:

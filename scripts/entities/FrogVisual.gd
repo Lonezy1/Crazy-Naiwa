@@ -26,6 +26,7 @@ var stand_texture: Texture2D
 var grab_texture: Texture2D
 var display_size_scale := 1.0
 var is_dragging := false
+var idle_animation_enabled := true
 
 func _ready() -> void:
 	base_scale = scale
@@ -37,11 +38,22 @@ func _ready() -> void:
 	image_sprite.z_index = -1
 
 func _process(delta: float) -> void:
-	idle_phase += delta
+	if idle_animation_enabled:
+		idle_phase += delta
 	impact_seconds = maxf(0.0, impact_seconds - delta)
 	corner_flash_seconds = maxf(0.0, corner_flash_seconds - delta)
 	burst_seconds = maxf(0.0, burst_seconds - delta)
 	blink_seconds = maxf(0.0, blink_seconds - delta)
+	queue_redraw()
+	if not idle_animation_enabled and impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and burst_seconds <= 0.0 and blink_seconds <= 0.0:
+		set_process(false)
+
+func set_idle_animation_enabled(enabled: bool) -> void:
+	idle_animation_enabled = enabled
+	if enabled:
+		set_process(true)
+	elif impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and burst_seconds <= 0.0 and blink_seconds <= 0.0:
+		set_process(false)
 	queue_redraw()
 
 func apply_behavior(state: PetBehavior) -> void:
@@ -70,11 +82,13 @@ func set_dragging(value: bool) -> void:
 
 func play_burst() -> void:
 	burst_seconds = 0.65
+	set_process(true)
 	play_blink()
 	queue_redraw()
 
 func play_impact() -> void:
 	impact_seconds = 0.42
+	set_process(true)
 	queue_redraw()
 
 func is_point_on_pet(viewport_position: Vector2) -> bool:
@@ -147,9 +161,12 @@ static func _content_outline() -> PackedVector2Array:
 
 func play_blink() -> void:
 	blink_seconds = 0.18
+	set_process(true)
+	queue_redraw()
 
 func _draw() -> void:
-	var breathing := sin(idle_phase * 2.0) * 0.025
+	var is_dragging := mode == PetBehavior.Mode.DRAG
+	var breathing := 0.0 if is_dragging or not idle_animation_enabled else sin(idle_phase * 2.0) * 0.025
 	var stretch := 0.0
 	var squish := 0.0
 	var tilt := 0.0
@@ -165,14 +182,11 @@ func _draw() -> void:
 			stretch = clampf(absf(velocity.y) / 1500.0, 0.0, 0.26)
 			squish = -stretch * 0.58
 			tilt = clampf(velocity.x / 1800.0, -0.18, 0.18)
-		PetBehavior.Mode.DRAG:
-			stretch = clampf(drag_vector.length() / 400.0, 0.0, 0.42)
-			tilt = clampf(drag_vector.x / 450.0, -0.28, 0.28)
 		PetBehavior.Mode.DVD_BOUNCE:
 			tilt = clampf(velocity.x / 2800.0, -0.08, 0.08)
 	var scale_x := 1.0 + breathing + stretch - squish * 0.4
 	var scale_y := 1.0 - breathing - stretch * 0.48 + squish
-	if impact_seconds > 0.0:
+	if impact_seconds > 0.0 and not is_dragging:
 		var impact := sin((0.42 - impact_seconds) * 24.0) * (impact_seconds / 0.42)
 		scale_x *= 1.0 + impact * 0.23
 		scale_y *= 1.0 - impact * 0.19

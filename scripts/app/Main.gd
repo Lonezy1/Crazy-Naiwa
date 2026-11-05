@@ -22,7 +22,7 @@ var dragging := false
 var drag_offset := Vector2.ZERO
 
 func _ready() -> void:
-	Engine.max_fps = 30
+	Engine.max_fps = 60
 	settings = get_node("/root/PetSettings")
 	var pet_window := get_window()
 	pet_window.transparent = true
@@ -112,7 +112,9 @@ func _input(event: InputEvent) -> void:
 						DesktopBounds.current_work_area(),
 						get_window().size,
 						Vector2(release_result["release_velocity"]),
+						Vector2(release_result["release_acceleration"]),
 						settings.long_press_mode == PetSettingsStore.LongPressMode.TOSS,
+						settings.throw_strength,
 						frog.get_content_bounds(),
 						PET_EDGE_MARGIN
 					)
@@ -147,6 +149,7 @@ func _build_menu() -> void:
 	menu.setting_selected.connect(_on_menu_setting_selected)
 	menu.volume_selected.connect(_on_menu_volume_selected)
 	menu.long_press_mode_selected.connect(_on_long_press_mode_selected)
+	menu.throw_strength_selected.connect(_on_throw_strength_selected)
 	menu.fleet_command_selected.connect(_on_fleet_command_selected)
 	menu.size_selected.connect(_on_frog_size_selected)
 	menu.collision_enabled_selected.connect(_on_collision_enabled_selected)
@@ -215,6 +218,12 @@ func _on_menu_volume_selected(value: float) -> void:
 
 func _on_long_press_mode_selected(mode: int) -> void:
 	settings.long_press_mode = mode
+	settings.save_settings()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
+func _on_throw_strength_selected(value: float) -> void:
+	settings.throw_strength = value
 	settings.save_settings()
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)

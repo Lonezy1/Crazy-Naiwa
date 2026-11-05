@@ -26,6 +26,7 @@ func _ready() -> void:
 	visual = FrogVisualScene.instantiate() as Node2D
 	visual.name = "Frog"
 	add_child(visual)
+	visual.call("set_idle_animation_enabled", false)
 	_apply_size()
 	_build_menu()
 	close_requested.connect(_on_close_requested)
@@ -50,7 +51,8 @@ func refresh_menu_state(small_pet_count: int, collisions_enabled: bool, collisio
 			small_pet_count,
 			collisions_enabled,
 			collision_strength,
-			small_pet_count < 100
+			small_pet_count < 100,
+			settings.throw_strength
 		)
 
 func _input(event: InputEvent) -> void:

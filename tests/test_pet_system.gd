@@ -42,6 +42,7 @@ func _test_settings() -> void:
 	saved.sound_enabled = false
 	saved.sfx_volume = 0.25
 	saved.long_press_mode = PetSettingsStore.LongPressMode.TOSS
+	saved.throw_strength = 1.8
 	saved.frog_size = 544
 	saved.collisions_enabled = false
 	saved.collision_strength = 1.15
@@ -58,6 +59,7 @@ func _test_settings() -> void:
 	_expect(not loaded.sound_enabled, "settings preserve sound_enabled")
 	_expect(is_equal_approx(loaded.sfx_volume, 0.25), "settings preserve sfx_volume")
 	_expect(loaded.long_press_mode == PetSettingsStore.LongPressMode.TOSS, "settings preserve long press mode")
+	_expect(is_equal_approx(loaded.throw_strength, 1.8), "settings preserve throw strength")
 	_expect(loaded.frog_size == 544, "settings preserve primary frog size")
 	_expect(not loaded.collisions_enabled, "settings preserve collision toggle")
 	_expect(is_equal_approx(loaded.collision_strength, 1.15), "settings preserve collision strength")
@@ -73,28 +75,57 @@ func _test_settings() -> void:
 func _test_gestures() -> void:
 	var gesture := PetGesture.new()
 	gesture.begin(Vector2.ZERO, 0.0)
-	var early_move := gesture.update(Vector2(40.0, 0.0), 0.2)
-	_expect(not early_move["dragging"], "movement before the hold threshold does not drag")
-	var held_move := gesture.update(Vector2(60.0, 0.0), 0.31)
-	_expect(not held_move["dragging"], "movement accumulated before the hold threshold is ignored")
-	var post_hold_move := gesture.update(Vector2(72.0, 0.0), 0.34)
-	_expect(post_hold_move["dragging"], "movement after the hold threshold starts a drag")
-	_expect(post_hold_move["started_drag"], "gesture reports the drag transition once")
+	var early_move := gesture.update(Vector2(40.0, 0.0), 0.005)
+	_expect(not early_move["dragging"], "movement before the 0.01 second threshold does not drag")
+	var held_move := gesture.advance(Vector2(40.0, 0.0), 0.02)
+	_expect(held_move["dragging"], "held movement starts immediately at the 0.01 second threshold")
+	_expect(held_move["started_drag"], "gesture reports the drag transition once")
 	_expect(
-		post_hold_move["drag_origin_position"] == Vector2(60.0, 0.0),
-		"drag anchor resets after the hold threshold"
+		held_move["drag_origin_position"] == Vector2.ZERO,
+		"drag retains the original grab anchor"
 	)
 	_expect(
-		Vector2(post_hold_move["position"]).x - Vector2(post_hold_move["drag_origin_position"]).x == 12.0,
-		"post-hold movement remains continuous without including pre-hold movement"
+		Vector2(held_move["position"]).x - Vector2(held_move["drag_origin_position"]).x == 40.0,
+		"movement made during the hold is applied at drag start without waiting for another mouse move"
 	)
-	var release := gesture.end(Vector2(180.0, 0.0), 0.36)
+	var release := gesture.end(Vector2(180.0, 0.0), 0.05)
 	_expect(release["dragging"], "gesture release preserves drag classification")
 	_expect(Vector2(release["release_velocity"]).length() >= PetBehavior.THROW_SPEED_THRESHOLD, "recent pointer samples detect a fast flick")
 	_expect(gesture.phase == PetGesture.Phase.IDLE, "gesture resets after release")
 	gesture.begin(Vector2.ZERO, 1.0)
-	var short_press := gesture.end(Vector2(5.0, 0.0), 1.2)
+	var short_press := gesture.end(Vector2(5.0, 0.0), 1.1)
 	_expect(not short_press["dragging"], "short click remains a non-drag gesture")
+	gesture.begin(Vector2.ZERO, 2.0)
+	var stationary_hold := gesture.advance(Vector2.ZERO, 2.02)
+	_expect(not stationary_hold["dragging"], "holding without pointer movement does not start a drag")
+	var first_post_hold_move := gesture.update(Vector2(12.0, 0.0), 2.03)
+	_expect(first_post_hold_move["started_drag"], "first movement after a stationary hold starts dragging")
+	var accelerating_gesture := PetGesture.new()
+	accelerating_gesture.begin(Vector2.ZERO, 3.0)
+	accelerating_gesture.update(Vector2(20.0, 0.0), 3.02)
+	accelerating_gesture.update(Vector2(60.0, 0.0), 3.04)
+	var accelerating_release := accelerating_gesture.end(Vector2(150.0, 0.0), 3.06)
+	_expect(
+		Vector2(accelerating_release["release_acceleration"]).x > 0.0,
+		"gesture release carries forward mouse acceleration"
+	)
+	var sampled_gesture := PetGesture.new()
+	sampled_gesture.begin(Vector2.ZERO, 3.0)
+	sampled_gesture.update(Vector2(100.0, 0.0), 3.02)
+	sampled_gesture.advance(Vector2(100.0, 0.0), 3.03)
+	var sampled_release := sampled_gesture.end(Vector2(100.0, 0.0), 3.04)
+	_expect(
+		Vector2(sampled_release["release_velocity"]).x >= 4900.0,
+		"stationary pointer polls do not dilute the last flick speed"
+	)
+	var stale_gesture := PetGesture.new()
+	stale_gesture.begin(Vector2.ZERO, 4.0)
+	stale_gesture.update(Vector2(100.0, 0.0), 4.02)
+	var stale_release := stale_gesture.end(Vector2(100.0, 0.0), 4.2)
+	_expect(
+		Vector2(stale_release["release_velocity"]).is_zero_approx(),
+		"a pause after flicking does not preserve stale throw speed"
+	)
 
 func _test_audio_and_menu() -> void:
 	for effect in PetAudio.EFFECT_SPECS.keys():
@@ -125,6 +156,10 @@ func _test_audio_and_menu() -> void:
 	_expect(menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu disables empty clone cleanup")
 	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.QUARTER)), "volume submenu reflects selected level")
 	_expect(menu.long_press_menu.is_item_checked(menu.long_press_menu.get_item_index(PetContextMenu.LongPressOption.MOVE)), "long press menu marks move mode")
+	_expect(
+		menu.throw_strength_menu.is_item_checked(menu.throw_strength_menu.get_item_index(53)),
+		"throw strength menu reflects the default setting"
+	)
 	menu.refresh_state(true, false, true, 0.5, 50, PetSettingsStore.LongPressMode.TOSS)
 	_expect(not menu.is_item_checked(menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu reflects resumed state")
 	_expect(not menu.is_item_disabled(menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu enables clone cleanup when clones exist")
@@ -134,6 +169,10 @@ func _test_audio_and_menu() -> void:
 	menu.long_press_mode_selected.connect(func(value: int) -> void: selected_mode[0] = value)
 	menu._on_long_press_mode_id_pressed(PetContextMenu.LongPressOption.TOSS)
 	_expect(selected_mode[0] == PetSettingsStore.LongPressMode.TOSS, "long press menu emits selected mode")
+	var selected_throw_strength := [0.0]
+	menu.throw_strength_selected.connect(func(value: float) -> void: selected_throw_strength[0] = value)
+	menu._on_throw_strength_id_pressed(54)
+	_expect(is_equal_approx(selected_throw_strength[0], 1.8), "throw strength menu emits selected multiplier")
 	menu.queue_free()
 	var pet_menu := PetContextMenu.new()
 	pet_menu.fleet_only = true
@@ -202,7 +241,7 @@ func _test_behavior() -> void:
 	behavior.begin_drag(Vector2(100, 100))
 	behavior.move_drag(Vector2(900, 700), Vector2(140, 110))
 	var move_result := behavior.end_drag(
-		work_area, window_size, Vector2.ZERO, false
+		work_area, window_size, Vector2.ZERO, Vector2.ZERO, false
 	)
 	_expect(move_result["action"] == "move", "move mode keeps the pet at the dragged position")
 	_expect(behavior.mode == PetBehavior.Mode.IDLE, "move mode holds the pet after release")
@@ -212,7 +251,7 @@ func _test_behavior() -> void:
 	behavior.begin_drag(Vector2.ZERO)
 	behavior.move_drag(Vector2(100, 100), Vector2(100, 100))
 	var toss_fall_result := behavior.end_drag(
-		work_area, window_size, Vector2(100.0, 0.0), true
+		work_area, window_size, Vector2(100.0, 0.0), Vector2.ZERO, true
 	)
 	_expect(toss_fall_result["action"] == "fall", "slow release enters gravity fall mode")
 	_expect(behavior.mode == PetBehavior.Mode.FALL, "slow release uses fall state")
@@ -227,14 +266,38 @@ func _test_behavior() -> void:
 
 	behavior.initialize(Vector2(470, 100))
 	behavior.begin_drag(Vector2.ZERO)
+	var baseline_throw := PetBehavior.new()
+	baseline_throw.initialize(Vector2(200, 100))
+	baseline_throw.begin_drag(Vector2.ZERO)
+	baseline_throw.end_drag(
+		work_area, window_size, Vector2(500.0, 0.0), Vector2.ZERO, true, 1.0
+	)
+	var baseline_speed := baseline_throw.velocity.length()
 	var throw_result := behavior.end_drag(
-		work_area, window_size, Vector2(1000.0, 0.0), true
+		work_area, window_size, Vector2(500.0, 0.0), Vector2(8000.0, 0.0), true, 1.5
 	)
 	_expect(throw_result["action"] == "throw", "fast release enters throw mode")
 	_expect(behavior.mode == PetBehavior.Mode.LAUNCH, "fast release uses launch state")
-	_expect(is_equal_approx(behavior.velocity.x, 950.0), "throw velocity follows flick direction")
+	_expect(behavior.velocity.x > baseline_speed, "forward mouse acceleration increases throw speed")
+	_expect(behavior.velocity.x > 1500.0, "configured throw strength produces a stronger launch")
+	_expect(behavior.velocity.x <= PetBehavior.MAX_THROW_SPEED, "throw velocity respects its safety cap")
 	behavior.advance(0.05, work_area, window_size)
 	_expect(behavior.window_position.x == 480.0 and behavior.velocity.x < 0.0, "throw rebounds from the screen edge")
+	behavior.initialize(Vector2(200, 100))
+	behavior.begin_drag(Vector2.ZERO)
+	var acceleration_throw := behavior.end_drag(
+		work_area, window_size, Vector2(180.0, 0.0), Vector2(10000.0, 0.0), true, 1.5
+	)
+	_expect(acceleration_throw["action"] == "throw", "forward acceleration can trigger a throw below the base speed threshold")
+	_expect(behavior.velocity.x > PetBehavior.THROW_SPEED_THRESHOLD, "acceleration contributes to launch distance")
+	behavior.initialize(Vector2(100, 100))
+	behavior.begin_drag(Vector2.ZERO)
+	behavior.end_drag(work_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	behavior.advance(0.2, work_area, window_size)
+	_expect(
+		is_equal_approx(behavior.velocity.y, PetBehavior.THROW_GRAVITY * 0.2),
+		"reduced throw gravity keeps the launch airborne longer"
+	)
 
 	behavior.set_enabled(false)
 	behavior.initialize(Vector2(100, 200))
@@ -259,7 +322,7 @@ func _test_behavior() -> void:
 
 	behavior.initialize(Vector2(470, 100))
 	behavior.begin_drag(Vector2.ZERO)
-	behavior.end_drag(work_area, window_size, Vector2(1000.0, 0.0), true)
+	behavior.end_drag(work_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
 	behavior.advance(0.05, work_area, window_size)
 	_expect(behavior.window_position.x == 480.0 and behavior.velocity.x < 0.0, "manual throw still rebounds while antics are paused")
 
@@ -308,6 +371,11 @@ func _test_collision_world() -> void:
 	world.add_body(2, 100, Vector2(340, 100), area)
 	world.begin_drag(0, Vector2(150, 150))
 	world.move_drag(0, Vector2(270, 150))
+	world.advance(PetCollisionWorld.FIXED_STEP, [area])
+	_expect(
+		Vector2(world.get_body(0)["position"]).is_equal_approx(Vector2(220, 100)),
+		"dragged frog follows the latest pointer target without a speed-limited catch-up"
+	)
 	for _step in range(24):
 		world.advance(PetCollisionWorld.FIXED_STEP, [area])
 	_expect(Vector2(world.get_body(1)["velocity"]).x > 0.0, "dragged frog transfers momentum to first target")
@@ -344,6 +412,15 @@ func _test_frog_hit_region() -> void:
 		grabbed_state.mode = PetBehavior.Mode.DRAG
 		frog.apply_behavior(grabbed_state)
 		_expect(sprite.texture == FrogTexture, "missing grab artwork falls back to the standing sprite")
+		frog.set_dragging(true)
+		frog.drag_vector = Vector2(600.0, 300.0)
+		frog.idle_phase = 1.2
+		frog.impact_seconds = 0.2
+		await process_frame
+		await process_frame
+		_expect(sprite.scale.is_equal_approx(frog.base_image_scale), "dragging does not stretch or squash the frog")
+		_expect(is_zero_approx(sprite.rotation), "dragging does not tilt the frog")
+		frog.set_dragging(false)
 	frog.position = Vector2(160, 172)
 	_expect(frog.is_point_on_pet(Vector2(160, 172)), "frog center is clickable")
 	_expect(not frog.is_point_on_pet(Vector2(0, 0)), "transparent area is not clickable")

@@ -205,7 +205,8 @@ func refresh_menu(menu: PetContextMenu, clone_count: int = 0) -> void:
 		get_small_pet_count(),
 		collisions_enabled,
 		collision_strength,
-		get_small_pet_count() < MAX_SMALL_PETS
+		get_small_pet_count() < MAX_SMALL_PETS,
+		_settings.throw_strength
 	)
 
 func persist_state() -> void:
@@ -242,6 +243,11 @@ func sync_primary_position(position: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	if not _active or world.bodies.size() < 2:
+		return
+	if not _pointer_down and not world.has_motion():
+		if _state_dirty:
+			_state_dirty = false
+			_persist_state()
 		return
 	_refresh_content_bounds()
 	if _pointer_down:
@@ -326,7 +332,9 @@ func _sync_windows() -> void:
 		var position: Vector2 = body["position"]
 		var pet_window: Window = _windows.get(id)
 		if is_instance_valid(pet_window):
-			pet_window.position = Vector2i(roundi(position.x), roundi(position.y))
+			var window_position := Vector2i(roundi(position.x), roundi(position.y))
+			if pet_window.position != window_position:
+				pet_window.position = window_position
 		if id == 0 and is_instance_valid(_behavior):
 			_behavior.window_position = position
 

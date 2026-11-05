@@ -29,8 +29,8 @@ enum Command {
 	REMOVE_THIS_PET,
 	FROG_SIZE,
 	COLLISION_ENABLED,
-	COLLISION_STRENGTH,
 	FLEET_STATUS,
+	FALL_ON_SLOW_RELEASE,
 }
 
 enum Setting {
@@ -56,6 +56,7 @@ signal command_selected(command: int)
 signal setting_selected(setting: int, enabled: bool)
 signal volume_selected(value: float)
 signal long_press_mode_selected(mode: int)
+signal fall_on_slow_release_selected(enabled: bool)
 signal throw_strength_selected(value: float)
 signal throw_style_selected(style: int)
 signal throw_duration_selected(seconds: int)
@@ -63,10 +64,8 @@ signal throw_tuning_selected(tuning: int, value: float)
 signal fleet_command_selected(command: int)
 signal size_selected(size: int)
 signal collision_enabled_selected(enabled: bool)
-signal collision_strength_selected(value: float)
 
 const SIZE_OPTIONS := [320, 461, 544, 640]
-const COLLISION_STRENGTH_OPTIONS := [0.65, 0.85, 1.0, 1.15]
 
 const VOLUME_OPTIONS := [
 	{"id": VolumeOption.MUTE, "value": 0.0, "label": "静音"},
@@ -83,12 +82,12 @@ var throw_style_menu: PopupMenu
 var throw_duration_menu: PopupMenu
 var throw_tuning_menus: Dictionary = {}
 var size_menu: PopupMenu
-var collision_menu: PopupMenu
 var _command_menus: Dictionary = {}
 var _antics_enabled := true
 var _always_on_top := true
 var _sound_enabled := true
 var _collision_enabled := true
+var _fall_on_slow_release := false
 var fleet_only := false
 
 func _ready() -> void:
@@ -106,7 +105,6 @@ func refresh_state(
 	frog_size: int = 320,
 	small_pet_count: int = 0,
 	collisions_enabled: bool = true,
-	collision_strength: float = 1.0,
 	can_spawn: bool = true,
 	throw_strength: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["strength"],
 	throw_damping: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["damping"],
@@ -114,12 +112,14 @@ func refresh_state(
 	throw_bounce: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["bounce"],
 	throw_style: int = PetThrowProfile.DEFAULT_STYLE,
 	throw_duration_seconds: int = PetThrowProfile.DEFAULT_DURATION,
-	throw_active: bool = false
+	throw_active: bool = false,
+	fall_on_slow_release: bool = false
 ) -> void:
 	_antics_enabled = antics_enabled
 	_always_on_top = always_on_top
 	_sound_enabled = sound_enabled
 	_collision_enabled = collisions_enabled
+	_fall_on_slow_release = fall_on_slow_release
 	_set_checked(Command.TOGGLE_ANTICS, not antics_enabled)
 	_set_checked(Command.TOGGLE_ALWAYS_ON_TOP, always_on_top)
 	_set_checked(Command.TOGGLE_SOUND, sound_enabled)
@@ -127,6 +127,8 @@ func refresh_state(
 	if not fleet_only:
 		_set_volume_checked(sfx_volume)
 		_set_long_press_mode_checked(long_press_mode)
+		_set_checked(Command.FALL_ON_SLOW_RELEASE, fall_on_slow_release)
+		_set_disabled(Command.FALL_ON_SLOW_RELEASE, long_press_mode != LongPressOption.TOSS)
 		_set_throw_strength_checked(throw_strength)
 		_set_throw_style_checked(throw_style)
 		_set_throw_duration_checked(throw_duration_seconds)
@@ -137,8 +139,6 @@ func refresh_state(
 	_set_disabled(Command.STOP_THROW, not throw_active)
 	if size_menu:
 		_set_size_checked(frog_size)
-	if collision_menu:
-		_set_collision_checked(collision_strength)
 	_set_checked(Command.COLLISION_ENABLED, collisions_enabled)
 	_set_disabled(Command.SPAWN_SMALL_PET, not can_spawn)
 	_set_disabled(Command.CLEAR_SMALL_PETS, small_pet_count <= 0)
@@ -166,7 +166,6 @@ func _build_items() -> void:
 	_add_item(fleet_menu, "清理全部小奶蛙", Command.CLEAR_SMALL_PETS)
 	_add_item(fleet_menu, "小奶蛙 0 / 100", Command.FLEET_STATUS)
 	_add_check_item(fleet_menu, "奶蛙间碰撞", Command.COLLISION_ENABLED)
-	_build_collision_menu(fleet_menu)
 
 	_build_preferences_menu()
 	add_separator()
@@ -181,7 +180,6 @@ func _build_fleet_items() -> void:
 	var fleet_menu := _build_group("分身与碰撞", "FleetMenu", 4)
 	_add_item(fleet_menu, "小奶蛙 0 / 100", Command.FLEET_STATUS)
 	_add_check_item(fleet_menu, "奶蛙间碰撞", Command.COLLISION_ENABLED)
-	_build_collision_menu(fleet_menu)
 	add_separator()
 	_add_item(self, "退出这只奶蛙", Command.REMOVE_THIS_PET, 9)
 
@@ -236,6 +234,7 @@ func _build_throw_menu() -> void:
 	long_press_menu.id_pressed.connect(_on_long_press_mode_id_pressed)
 	add_child(long_press_menu)
 	_add_submenu(throw_menu, "长按模式", long_press_menu, Command.LONG_PRESS_MODE)
+	_add_check_item(throw_menu, "慢速松手后下坠", Command.FALL_ON_SLOW_RELEASE)
 
 	throw_strength_menu = PopupMenu.new()
 	throw_strength_menu.name = "ThrowStrengthMenu"
@@ -251,7 +250,7 @@ func _build_throw_menu() -> void:
 		throw_menu,
 		PetSettingsStore.ThrowTuning.DAMPING,
 		Command.THROW_DAMPING,
-		"甩飞阻尼",
+		"甩动与碰撞阻尼",
 		"ThrowDampingMenu",
 		PetThrowProfile.DAMPING_OPTIONS
 	)
@@ -268,7 +267,7 @@ func _build_throw_menu() -> void:
 		throw_menu,
 		PetSettingsStore.ThrowTuning.BOUNCE,
 		Command.THROW_BOUNCE,
-		"边缘回弹",
+		"甩动与碰撞回弹",
 		"ThrowBounceMenu",
 		PetThrowProfile.BOUNCE_OPTIONS,
 		true,
@@ -317,8 +316,9 @@ func _on_menu_id_pressed(id: int) -> void:
 		Command.COLLISION_ENABLED:
 			_collision_enabled = not _collision_enabled
 			collision_enabled_selected.emit(_collision_enabled)
-		Command.COLLISION_STRENGTH:
-			command_selected.emit(id)
+		Command.FALL_ON_SLOW_RELEASE:
+			_fall_on_slow_release = not _fall_on_slow_release
+			fall_on_slow_release_selected.emit(_fall_on_slow_release)
 		Command.THROW_DAMPING, Command.THROW_GRAVITY, Command.THROW_BOUNCE:
 			pass
 		_:
@@ -357,10 +357,6 @@ func _on_throw_tuning_id_pressed(id: int, tuning: int) -> void:
 func _on_size_id_pressed(id: int) -> void:
 	if id in SIZE_OPTIONS:
 		size_selected.emit(id)
-
-func _on_collision_id_pressed(id: int) -> void:
-	if id >= 10 and id < 10 + COLLISION_STRENGTH_OPTIONS.size():
-		collision_strength_selected.emit(COLLISION_STRENGTH_OPTIONS[id - 10])
 
 func _set_volume_checked(value: float) -> void:
 	var selected_value := clampf(roundf(value * 4.0) / 4.0, 0.0, 1.0)
@@ -440,13 +436,6 @@ func _set_size_checked(value: int) -> void:
 	for size in SIZE_OPTIONS:
 		size_menu.set_item_checked(size_menu.get_item_index(size), size == value)
 
-func _set_collision_checked(strength: float) -> void:
-	for index in range(COLLISION_STRENGTH_OPTIONS.size()):
-		collision_menu.set_item_checked(
-			collision_menu.get_item_index(10 + index),
-			is_equal_approx(COLLISION_STRENGTH_OPTIONS[index], strength)
-		)
-
 func _build_size_menu(parent_menu: PopupMenu) -> void:
 	size_menu = PopupMenu.new()
 	size_menu.name = "FrogSizeMenu"
@@ -456,16 +445,6 @@ func _build_size_menu(parent_menu: PopupMenu) -> void:
 	size_menu.id_pressed.connect(_on_size_id_pressed)
 	add_child(size_menu)
 	_add_submenu(parent_menu, "大小", size_menu, Command.FROG_SIZE)
-
-func _build_collision_menu(parent_menu: PopupMenu) -> void:
-	collision_menu = PopupMenu.new()
-	collision_menu.name = "CollisionMenu"
-	collision_menu.theme = theme
-	for index in range(COLLISION_STRENGTH_OPTIONS.size()):
-		collision_menu.add_radio_check_item("反弹强度 %d%%" % roundi(COLLISION_STRENGTH_OPTIONS[index] * 100.0), 10 + index)
-	collision_menu.id_pressed.connect(_on_collision_id_pressed)
-	add_child(collision_menu)
-	_add_submenu(parent_menu, "反弹强度", collision_menu, Command.COLLISION_STRENGTH)
 
 func _set_checked(command: int, checked: bool) -> void:
 	var target_menu: PopupMenu = _command_menus.get(command, self)

@@ -6,6 +6,7 @@ signal drag_started
 signal drag_released
 
 const PetCollisionWorld = preload("res://scripts/entities/PetCollisionWorld.gd")
+const PetImpact = preload("res://scripts/core/PetImpact.gd")
 const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
@@ -19,7 +20,6 @@ const MAX_SIZE := 640
 const MAX_SMALL_PETS := 100
 
 var world := PetCollisionWorld.new()
-var collision_strength := 1.0
 var collisions_enabled := true
 var _windows: Dictionary = {}
 var _visuals: Dictionary = {}
@@ -40,9 +40,8 @@ func initialize_primary(pet_window: Window, visual: Node2D, behavior: PetBehavio
 	_swarm = swarm
 	_audio = audio
 	collisions_enabled = _settings.collisions_enabled
-	collision_strength = _settings.collision_strength
 	world.collisions_enabled = collisions_enabled
-	world.collision_strength = collision_strength
+	world.set_collision_physics(_settings.throw_damping, _settings.throw_bounce)
 	_windows[0] = pet_window
 	_visuals[0] = visual
 	var size := clampi(_settings.frog_size, MIN_SIZE, MAX_SIZE)
@@ -129,21 +128,19 @@ func set_pet_size(id: int, size: int) -> void:
 		return
 	size = clampi(size, MIN_SIZE, MAX_SIZE)
 	world.set_size(id, size)
+	_state_dirty = true
 	_apply_size(id, size)
 	_refresh_all_menus()
 	_persist_state()
 
 func set_collisions_enabled(value: bool) -> void:
 	collisions_enabled = value
-	world.collisions_enabled = value
+	world.set_collisions_enabled(value)
 	_refresh_all_menus()
 	_persist_state()
 
-func set_collision_strength(value: float) -> void:
-	collision_strength = clampf(value, 0.5, 1.25)
-	world.collision_strength = collision_strength
-	_refresh_all_menus()
-	_persist_state()
+func set_collision_physics(damping: float, restitution: float) -> void:
+	world.set_collision_physics(damping, restitution)
 
 func handle_pet_command(pet_id: int, command: int) -> void:
 	match command:
@@ -169,11 +166,8 @@ func pointer_release(pointer_position: Vector2) -> void:
 	if bool(result["started_drag"]):
 		_start_drag(Vector2(result["drag_origin_position"]))
 	if bool(result["dragging"]):
-		var collided_ids := world.finish_drag(_pointer_id, pointer_position, _all_work_areas())
-		for id in collided_ids:
-			var collided_visual: Node2D = _visuals.get(id)
-			if is_instance_valid(collided_visual):
-				collided_visual.call("play_impact")
+		var impacts := world.finish_drag(_pointer_id, pointer_position, _all_work_areas())
+		_apply_impacts(impacts)
 		world.release_drag(_pointer_id)
 		drag_released.emit()
 		_state_dirty = true
@@ -181,7 +175,7 @@ func pointer_release(pointer_position: Vector2) -> void:
 	else:
 		var visual: Node2D = _visuals.get(_pointer_id)
 		if is_instance_valid(visual):
-			visual.call("play_impact")
+			visual.call("play_blink")
 	_cancel_pointer()
 
 func has_active_pointer() -> bool:
@@ -204,7 +198,6 @@ func refresh_menu(menu: PetContextMenu, clone_count: int = 0, throw_active: bool
 		int(world.get_body(0).get("size", BASE_SIZE)),
 		get_small_pet_count(),
 		collisions_enabled,
-		collision_strength,
 		get_small_pet_count() < MAX_SMALL_PETS,
 		_settings.throw_strength,
 		_settings.throw_damping,
@@ -212,7 +205,8 @@ func refresh_menu(menu: PetContextMenu, clone_count: int = 0, throw_active: bool
 		_settings.throw_bounce,
 		_settings.throw_style,
 		_settings.throw_duration_seconds,
-		throw_active
+		throw_active,
+		_settings.fall_on_slow_release
 	)
 
 func persist_state() -> void:
@@ -266,13 +260,10 @@ func _process(delta: float) -> void:
 			_start_drag(Vector2(result["drag_origin_position"]))
 		if bool(result["dragging"]):
 			world.move_drag(_pointer_id, pointer_position)
-	var collided_ids := world.advance(delta, _all_work_areas())
-	if not collided_ids.is_empty():
+	var impacts := world.advance(delta, _all_work_areas())
+	if not impacts.is_empty():
 		_state_dirty = true
-	for id in collided_ids:
-		var visual: Node2D = _visuals.get(id)
-		if is_instance_valid(visual):
-			visual.call("play_impact")
+	_apply_impacts(impacts)
 	_sync_windows()
 	if _state_dirty and not world.has_motion():
 		_state_dirty = false
@@ -286,6 +277,7 @@ func _create_pet(id: int, size: int, position: Vector2, area: Rect2i) -> void:
 	_windows[id] = pet_window
 	_visuals[id] = pet_window.get("visual")
 	world.add_body(id, size, position, area, FrogVisual.content_bounds_for_size(float(size)))
+	_state_dirty = true
 	_apply_size(id, size)
 	pet_window.visible = true
 
@@ -313,7 +305,7 @@ func _apply_size(id: int, size: int) -> void:
 	else:
 		pet_window.mouse_passthrough_polygon = visual.call("get_mouse_region")
 	if id != 0:
-		pet_window.call("refresh_menu_state", get_small_pet_count(), collisions_enabled, collision_strength)
+		pet_window.call("refresh_menu_state", get_small_pet_count(), collisions_enabled)
 
 func _start_drag(drag_origin_position: Vector2) -> void:
 	if world.begin_drag(_pointer_id, drag_origin_position):
@@ -336,13 +328,24 @@ func _sync_windows() -> void:
 	for body in world.bodies:
 		var id := int(body["id"])
 		var position: Vector2 = body["position"]
+		var velocity: Vector2 = body["velocity"]
 		var pet_window: Window = _windows.get(id)
 		if is_instance_valid(pet_window):
 			var window_position := Vector2i(roundi(position.x), roundi(position.y))
 			if pet_window.position != window_position:
 				pet_window.position = window_position
+		var visual: Node2D = _visuals.get(id)
+		if is_instance_valid(visual):
+			visual.call("set_physics_velocity", velocity)
 		if id == 0 and is_instance_valid(_behavior):
 			_behavior.window_position = position
+			_behavior.velocity = velocity
+
+func _apply_impacts(impacts: Array[PetImpact]) -> void:
+	for impact: PetImpact in impacts:
+		var visual: Node2D = _visuals.get(impact.body_id)
+		if is_instance_valid(visual):
+			visual.call("play_impact", impact.normal, impact.speed)
 
 func _refresh_content_bounds() -> void:
 	for id in _visuals:
@@ -411,7 +414,7 @@ func _refresh_all_menus() -> void:
 			continue
 		var pet_window: Window = _windows[id]
 		if is_instance_valid(pet_window):
-			pet_window.call("refresh_menu_state", get_small_pet_count(), collisions_enabled, collision_strength)
+			pet_window.call("refresh_menu_state", get_small_pet_count(), collisions_enabled)
 
 func _persist_state() -> void:
 	var saved_pets: Array[Dictionary] = []
@@ -435,5 +438,4 @@ func _persist_state() -> void:
 		_settings.has_window_position = true
 	_settings.frog_instances = saved_pets
 	_settings.collisions_enabled = collisions_enabled
-	_settings.collision_strength = collision_strength
 	_settings.save_settings()

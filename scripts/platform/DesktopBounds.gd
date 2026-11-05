@@ -65,18 +65,28 @@ static func advance_bounce(
 	var next := position + velocity * delta
 	var hit_x := false
 	var hit_y := false
+	var impact_normal := Vector2.ZERO
+	var impact_velocity := Vector2.ZERO
 	if next.x < minimum.x or next.x > maximum.x:
+		impact_normal.x = -velocity.x if not is_zero_approx(velocity.x) else (1.0 if next.x <= minimum.x else -1.0)
+		impact_velocity.x = velocity.x
 		next.x = clampf(next.x, minimum.x, maximum.x)
 		velocity.x = absf(velocity.x) if next.x <= minimum.x else -absf(velocity.x)
 		hit_x = true
 	if next.y < minimum.y or next.y > maximum.y:
+		impact_normal.y = -velocity.y if not is_zero_approx(velocity.y) else (1.0 if next.y <= minimum.y else -1.0)
+		impact_velocity.y = velocity.y
 		next.y = clampf(next.y, minimum.y, maximum.y)
 		velocity.y = absf(velocity.y) if next.y <= minimum.y else -absf(velocity.y)
 		hit_y = true
+	if not impact_normal.is_zero_approx():
+		impact_normal = impact_normal.normalized()
 	return {
 		"position": next,
 		"velocity": velocity,
 		"hit_x": hit_x,
 		"hit_y": hit_y,
-		"corner_hit": hit_x and hit_y
+		"corner_hit": hit_x and hit_y,
+		"impact_normal": impact_normal,
+		"impact_speed": impact_velocity.length()
 	}

@@ -38,7 +38,7 @@ func set_pet_size(size: int) -> void:
 func sync_position(position: Vector2) -> void:
 	self.position = Vector2i(roundi(position.x), roundi(position.y))
 
-func refresh_menu_state(small_pet_count: int, collisions_enabled: bool, collision_strength: float) -> void:
+func refresh_menu_state(small_pet_count: int, collisions_enabled: bool) -> void:
 	if menu:
 		menu.refresh_state(
 			settings.antics_enabled,
@@ -50,7 +50,6 @@ func refresh_menu_state(small_pet_count: int, collisions_enabled: bool, collisio
 			pet_size,
 			small_pet_count,
 			collisions_enabled,
-			collision_strength,
 			small_pet_count < 100,
 			settings.throw_strength
 		)
@@ -59,7 +58,7 @@ func _input(event: InputEvent) -> void:
 	if event is not InputEventMouseButton:
 		return
 	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		refresh_menu_state(fleet.get_small_pet_count(), fleet.collisions_enabled, fleet.collision_strength)
+		refresh_menu_state(fleet.get_small_pet_count(), fleet.collisions_enabled)
 		menu.position = DisplayServer.mouse_get_position()
 		menu.popup()
 		get_viewport().set_input_as_handled()
@@ -78,9 +77,8 @@ func _build_menu() -> void:
 	menu.fleet_command_selected.connect(_on_fleet_command_selected)
 	menu.size_selected.connect(_on_size_selected)
 	menu.collision_enabled_selected.connect(_on_collision_enabled_selected)
-	menu.collision_strength_selected.connect(_on_collision_strength_selected)
 	add_child(menu)
-	refresh_menu_state(fleet.get_small_pet_count(), fleet.collisions_enabled, fleet.collision_strength)
+	refresh_menu_state(fleet.get_small_pet_count(), fleet.collisions_enabled)
 
 func _apply_size() -> void:
 	content_scale_size = Vector2i(pet_size, pet_size)
@@ -108,9 +106,6 @@ func _on_size_selected(size_value: int) -> void:
 
 func _on_collision_enabled_selected(enabled: bool) -> void:
 	fleet.set_collisions_enabled(enabled)
-
-func _on_collision_strength_selected(strength: float) -> void:
-	fleet.set_collision_strength(strength)
 
 func _on_close_requested() -> void:
 	fleet.remove_pet(pet_id)

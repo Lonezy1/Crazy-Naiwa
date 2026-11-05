@@ -4,40 +4,40 @@
 
 ## 当前版本
 
-`0.4.5`（甩飞玩法预设与疯癫循环）
+`0.5.0`（方向性碰撞反馈、拖动距离甩动门槛与统一群体弹性）
 
 ## 当前能力
 
 - 透明、无边框、置顶窗口
-- 使用 `assets/character/stand.png` 作为角色立绘，支持呼吸与动作弹性形变，拖动时保持立绘比例
+- 使用 `assets/character/stand.png` 作为角色立绘，支持呼吸、蛄蛹动作与碰撞方向挤压，拖动时保持立绘比例
 - DVD 弹跳、任务栏蛄蛹、失重上浮后坠落
-- 可配置长按模式：长按并移动可定位桌宠，或启用甩动整活；甩飞支持标准、弹力球、疯癫循环三种预设，力度扩展至 600%，疯癫循环可设 10 秒、30 秒或持续运行并可手动停止；阻尼、重力缩放与边缘回弹可细调，速度限制为 6000 px/s
-- 连续戳击充气并在第十次弹飞
+- 可配置长按模式：移动模式松手后停在放置位置；甩动模式要求拖动至少 64 px 且达到速度门槛，并可单独开关慢速松手下坠；甩飞支持标准、弹力球、疯癫循环三种预设，力度扩展至 600%，疯癫循环可设 10 秒、30 秒或持续运行并可手动停止；阻尼、重力缩放与边缘回弹可细调，速度限制为 6000 px/s
 - 大小菜单可设置 320、461、544、640 px；任意奶蛙可生成小一号后代，最多 100 只且无自动过期，可单独退出或一次清理全部
-- 多只奶蛙使用共享固定步长物理，长按拖动作为碰撞源，碰撞可连锁传递并在各显示器工作区边缘反弹；松手后的奶蛙静止但仍可被撞动
+- 多只奶蛙使用共享固定步长物理，长按拖动作为碰撞源，大小不同的奶蛙可连锁传递碰撞；边缘与奶蛙间分离统一求解，所有奶蛙共用当前甩动模式的阻尼和回弹参数，撞击按方向触发短暂挤压回弹，松手后的奶蛙静止但仍可被撞动
 - 最多 50 个本窗口内的物理分身，可用鼠标划动搅动；15 秒后自动清理，也可手动清理
 - 右键菜单折叠为行为、甩动手感、分身与碰撞、偏好设置四组，组内子菜单共享统一主题和勾选状态
 - 音效由 `scripts/audio/PetAudio.gd` 统一管理，使用运行时短音效合成，不依赖来源未核实的外部音频素材
-- `user://crazy_naiwa.cfg` 统一持久化置顶、整活开关、音效开关、音量、甩飞预设/力度/阻尼/重力/回弹/疯癫时长、窗口位置、主奶蛙尺寸、后代奶蛙位置/尺寸和碰撞参数
+- `user://crazy_naiwa.cfg` 统一持久化置顶、整活开关、音效开关、音量、长按模式与慢速松手下坠、甩飞预设/力度/阻尼/重力/回弹/疯癫时长、窗口位置、主奶蛙尺寸、后代奶蛙位置/尺寸和碰撞开关；碰撞物理直接复用已保存的甩动参数
 
 ## 代码边界
 
 - `scripts/app/Main.gd`：窗口、输入与菜单编排
 - `scripts/ui/PetContextMenu.gd`：右键菜单结构、状态和命令信号
 - `scripts/audio/PetAudio.gd`：音效总线、短音效生成、播放器池与限流
-- `scripts/input/PetGesture.gd`：纯输入手势分类，识别长按、拖动和近期甩动速度
+- `scripts/input/PetGesture.gd`：纯输入手势分类，识别长按、拖动总距离和近期甩动速度
 - `scripts/core/PetBehavior.gd`：不依赖场景节点的行为状态机
 - `scripts/core/PetSettings.gd`：用户偏好持久化
 - `scripts/core/PetThrowProfile.gd`：甩飞预设、档位范围、运行时长与安全速度集中定义
 - `scripts/platform/DesktopBounds.gd`：多屏工作区边界计算
 - `scripts/entities/FrogVisual.gd`、`PetSwarm.gd`：角色表现与隔离的分身物理
 - `scripts/entities/PetFleet.gd`：小奶蛙窗口生命周期、命令路由与现有设置持久化
-- `scripts/entities/PetCollisionWorld.gd`：跨窗口统一碰撞、边界反弹和速度衰减
+- `scripts/entities/PetCollisionWorld.gd`：跨窗口固定步长碰撞、边界约束、分离求解和共用甩动预设的速度衰减/回弹
+- `scripts/core/PetImpact.gd`：主蛙与群体物理共用的方向性碰撞事件数据
 - `scripts/entities/FrogPetWindow.gd`、`scenes/FrogPetWindow.tscn`：小奶蛙独立透明窗口与局部菜单/输入
 - `scripts/ui/PetTheme.gd`：菜单色彩、间距、阴影、悬浮样式与图标
 - `scenes/FrogVisual.tscn`：角色图片节点，编辑器画布和运行时共用
 
-主奶蛙数据流为“鼠标 → `PetGesture` 分类 → `PetBehavior` → 主窗口渲染”；小奶蛙数据流为“任一奶蛙菜单/鼠标 → `PetFleet` 生命周期与命令 → `PetCollisionWorld` 固定步长状态 → 多窗口位置与角色渲染”。设置继续统一写入 `PetSettings` 使用的 Godot `ConfigFile`，包含各奶蛙 ID、尺寸、位置与碰撞参数，不引入第二套设置存储。旧的限时 `PetSwarm` 分身玩法保持独立。
+主奶蛙数据流为“鼠标 → `PetGesture` 分类（拖动距离与释放速度）→ `PetBehavior` / `PetImpact` → 主窗口渲染”；多只奶蛙数据流为“菜单/鼠标 → `PetFleet` → `PetCollisionWorld` / `PetImpact` → 多窗口位置与角色渲染”。设置继续统一写入 `PetSettings` 使用的 Godot `ConfigFile`，包含各奶蛙 ID、尺寸、位置与碰撞开关；群体碰撞直接读取同一份甩动模式参数，不引入第二套设置存储。旧的限时 `PetSwarm` 分身玩法保持独立。
 
 ## 素材接入边界
 

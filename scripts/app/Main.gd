@@ -2,6 +2,7 @@ extends Node2D
 
 const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
+const PetImpact = preload("res://scripts/core/PetImpact.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
@@ -20,6 +21,7 @@ var settings: Node
 var pointer_held := false
 var dragging := false
 var drag_offset := Vector2.ZERO
+var last_drag_pointer_position := Vector2.ZERO
 
 func _ready() -> void:
 	Engine.max_fps = 60
@@ -49,8 +51,9 @@ func _ready() -> void:
 	fleet.activity_changed.connect(_on_fleet_activity_changed)
 	fleet.fleet_changed.connect(_refresh_menu_state)
 	_build_menu()
-	fleet.restore_small_pets(settings.frog_instances)
-	_apply_behavior_visuals()
+	call_deferred("_restore_small_pets")
+	if not fleet.is_active():
+		_apply_behavior_visuals()
 	_update_mouse_region()
 	swarm.activity_finished.connect(_on_swarm_activity_finished)
 
@@ -66,10 +69,13 @@ func _process(delta: float) -> void:
 		if events.corner_hit:
 			frog.play_blink()
 			audio.play_effect(PetAudio.Effect.CORNER_BUMP)
+		for impact: PetImpact in events["impacts"]:
+			if impact.body_id == 0:
+				frog.play_impact(impact.normal, impact.speed)
 		if events.landed:
-			frog.play_impact()
 			audio.play_effect(PetAudio.Effect.LAND)
-	_apply_behavior_visuals()
+	if not fleet.is_active():
+		_apply_behavior_visuals()
 	if advance_behavior:
 		_set_window_position(behavior.window_position)
 
@@ -117,23 +123,16 @@ func _input(event: InputEvent) -> void:
 						settings.long_press_mode == PetSettingsStore.LongPressMode.TOSS,
 						settings.throw_strength,
 						frog.get_content_bounds(),
-						PET_EDGE_MARGIN
+						PET_EDGE_MARGIN,
+						settings.fall_on_slow_release,
+						Vector2(release_result["total"]).length()
 					)
 					match drag_result["action"]:
 						"throw": audio.play_effect(PetAudio.Effect.THROW)
 						_: audio.play_effect(PetAudio.Effect.DRAG_RELEASE)
 				else:
-					var result := behavior.poke(
-						DesktopBounds.current_work_area(),
-						get_window().size,
-						frog.get_content_bounds(),
-						PET_EDGE_MARGIN
-					)
-					if result.burst:
-						frog.play_burst()
-						audio.play_effect(PetAudio.Effect.BURST)
-					elif result.heavy_fall:
-						frog.play_impact()
+					if behavior.tap():
+						frog.play_impact(Vector2.DOWN, 1250.0)
 						audio.play_effect(PetAudio.Effect.LAND)
 					else:
 						audio.play_effect(PetAudio.Effect.POKE)
@@ -143,6 +142,7 @@ func _input(event: InputEvent) -> void:
 					_save_settings()
 				_update_mouse_region()
 				dragging = false
+				last_drag_pointer_position = Vector2.ZERO
 				get_viewport().set_input_as_handled()
 func _build_menu() -> void:
 	menu = PetContextMenu.new()
@@ -150,6 +150,7 @@ func _build_menu() -> void:
 	menu.setting_selected.connect(_on_menu_setting_selected)
 	menu.volume_selected.connect(_on_menu_volume_selected)
 	menu.long_press_mode_selected.connect(_on_long_press_mode_selected)
+	menu.fall_on_slow_release_selected.connect(_on_fall_on_slow_release_selected)
 	menu.throw_strength_selected.connect(_on_throw_strength_selected)
 	menu.throw_style_selected.connect(_on_throw_style_selected)
 	menu.throw_duration_selected.connect(_on_throw_duration_selected)
@@ -157,9 +158,12 @@ func _build_menu() -> void:
 	menu.fleet_command_selected.connect(_on_fleet_command_selected)
 	menu.size_selected.connect(_on_frog_size_selected)
 	menu.collision_enabled_selected.connect(_on_collision_enabled_selected)
-	menu.collision_strength_selected.connect(_on_collision_strength_selected)
 	add_child(menu)
 	_refresh_menu_state()
+
+func _restore_small_pets() -> void:
+	if is_instance_valid(fleet):
+		fleet.restore_small_pets(settings.frog_instances)
 
 func _on_menu_pressed(id: int) -> void:
 	match id:
@@ -229,6 +233,12 @@ func _on_long_press_mode_selected(mode: int) -> void:
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)
 
+func _on_fall_on_slow_release_selected(enabled: bool) -> void:
+	settings.fall_on_slow_release = enabled
+	settings.save_settings()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
 func _on_throw_strength_selected(value: float) -> void:
 	settings.throw_strength = value
 	settings.save_settings()
@@ -257,11 +267,7 @@ func _on_throw_tuning_selected(tuning: int, value: float) -> void:
 			settings.throw_gravity_scale = value
 		PetSettingsStore.ThrowTuning.BOUNCE:
 			settings.throw_bounce = value
-	behavior.set_throw_physics(
-		settings.throw_damping,
-		settings.throw_gravity_scale,
-		settings.throw_bounce
-	)
+	_sync_throw_configuration()
 	settings.save_settings()
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)
@@ -273,6 +279,8 @@ func _sync_throw_configuration() -> void:
 		settings.throw_bounce
 	)
 	behavior.set_throw_mode(settings.throw_style, settings.throw_duration_seconds)
+	if is_instance_valid(fleet):
+		fleet.set_collision_physics(settings.throw_damping, settings.throw_bounce)
 
 func _on_fleet_command_selected(command: int) -> void:
 	fleet.handle_pet_command(0, command)
@@ -287,12 +295,9 @@ func _on_collision_enabled_selected(enabled: bool) -> void:
 	fleet.set_collisions_enabled(enabled)
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)
 
-func _on_collision_strength_selected(strength: float) -> void:
-	fleet.set_collision_strength(strength)
-	audio.play_effect(PetAudio.Effect.MENU_CLICK)
-
 func _on_fleet_activity_changed(active: bool) -> void:
 	behavior.set_enabled(not active and settings.antics_enabled)
+	_apply_behavior_visuals()
 	_update_mouse_region()
 
 func _handle_gesture_result(result: Dictionary) -> void:
@@ -303,23 +308,33 @@ func _handle_gesture_result(result: Dictionary) -> void:
 		)
 	if dragging and bool(result.get("dragging", false)):
 		var screen_mouse := Vector2(result["position"])
+		var pointer_motion := screen_mouse - last_drag_pointer_position
 		var next_window_position := screen_mouse - Vector2(drag_offset)
 		behavior.move_drag(next_window_position, screen_mouse)
 		_apply_behavior_visuals()
+		var attempted_position := next_window_position
 		next_window_position = DesktopBounds.clamp_position_to_content(
 			next_window_position,
 			DesktopBounds.current_work_area(),
 			frog.get_content_bounds(),
 			PET_EDGE_MARGIN
 		)
+		var blocked_motion := next_window_position - attempted_position
+		if not blocked_motion.is_zero_approx():
+			var impact_normal := blocked_motion.normalized()
+			var impact_speed := maxf(0.0, -pointer_motion.dot(impact_normal)) * 60.0
+			if impact_speed >= PetImpact.MINIMUM_SPEED:
+				frog.play_impact(impact_normal, impact_speed)
 		behavior.move_drag(next_window_position, screen_mouse)
 		_set_window_position(next_window_position)
 		_apply_behavior_visuals()
+		last_drag_pointer_position = screen_mouse
 
 func _begin_drag(screen_position: Vector2, drag_origin_position: Vector2) -> void:
 	if dragging:
 		return
 	dragging = true
+	last_drag_pointer_position = screen_position
 	drag_offset = drag_origin_position - Vector2(get_window().position)
 	behavior.begin_drag(drag_origin_position)
 	audio.play_effect(PetAudio.Effect.GRAB_START)

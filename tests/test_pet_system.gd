@@ -263,6 +263,35 @@ func _test_collision_world() -> void:
 	_expect(edge_world.get_body(1)["position"].x <= 900.0, "collision body stays inside screen bounds")
 	_expect(edge_world.get_body(1)["velocity"].x < 0.0, "collision body reflects from screen edge")
 
+	var content_rect := Rect2(20.0, 10.0, 60.0, 80.0)
+	var content_edge_world := PetCollisionWorld.new()
+	content_edge_world.add_body(1, 100, Vector2(990, 200), area, content_rect)
+	content_edge_world.get_body(1)["velocity"] = Vector2(1800, 0)
+	_expect(
+		content_edge_world.get_body(1)["position"].x == 919.0,
+		"initial placement clamps by the visible-body edge"
+	)
+	content_edge_world.advance(PetCollisionWorld.FIXED_STEP, [area])
+	var bounced_body := content_edge_world.get_body(1)
+	_expect(bounced_body["position"].x == 919.0, "content boundary allows the window past the visible-body edge")
+	_expect(bounced_body["velocity"].x < 0.0, "content boundary reverses bounce at the visible-body edge")
+	_expect(
+		Vector2(bounced_body["position"]).x + Rect2(bounced_body["content_rect"]).end.x <= area.end.x - DesktopBounds.CONTENT_EDGE_MARGIN,
+		"bouncing body remains inside the work area"
+	)
+
+	var content_drag_world := PetCollisionWorld.new()
+	content_drag_world.add_body(0, 100, Vector2(100, 100), area, content_rect)
+	content_drag_world.begin_drag(0, Vector2(150, 150))
+	content_drag_world.finish_drag(0, Vector2(1200, 150), [area])
+	var dragged_body := content_drag_world.get_body(0)
+	_expect(dragged_body["position"].x == 919.0, "drag is clamped by the visible-body bounds")
+	_expect(
+		Vector2(dragged_body["position"]).x + Rect2(dragged_body["content_rect"]).end.x <= area.end.x - DesktopBounds.CONTENT_EDGE_MARGIN,
+		"dragged body remains inside the work area"
+	)
+	content_drag_world.release_drag(0)
+
 	var world := PetCollisionWorld.new()
 	world.add_body(0, 100, Vector2(100, 100), area)
 	world.add_body(1, 100, Vector2(220, 100), area)
@@ -309,6 +338,19 @@ func _test_frog_hit_region() -> void:
 	_expect(frog.is_point_on_pet(Vector2(160, 172)), "frog center is clickable")
 	_expect(not frog.is_point_on_pet(Vector2(0, 0)), "transparent area is not clickable")
 	_expect(frog.get_mouse_region().size() >= 12, "mouse passthrough region has a polygon")
+	var full_size_bounds := FrogVisual.content_bounds_for_size(320.0)
+	var expected_size_bounds := FrogVisual.content_bounds_for_size(160.0)
+	_expect(
+		is_equal_approx(expected_size_bounds.position.x, full_size_bounds.position.x * 0.5)
+			and is_equal_approx(expected_size_bounds.size.y, full_size_bounds.size.y * 0.5),
+		"size-scaled content bounds match the pet window layout"
+	)
+	var resting_bounds := frog.get_content_bounds()
+	sprite.scale = sprite.scale * Vector2(1.25, 1.15)
+	sprite.rotation = 0.2
+	var animated_bounds := frog.get_content_bounds()
+	_expect(animated_bounds.size.x > resting_bounds.size.x, "visible bounds include sprite tilt and stretch")
+	_expect(animated_bounds.size.y > resting_bounds.size.y, "visible bounds include vertical sprite stretch")
 	frog.inflation_scale = 1.8
 	frog.scale = Vector2(1.8, 1.8)
 	_expect(frog.is_point_on_pet(Vector2(260, 172)), "inflated frog hit region scales with it")

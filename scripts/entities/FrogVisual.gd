@@ -2,8 +2,13 @@ extends Node2D
 
 const PetTheme = preload("res://scripts/ui/PetTheme.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
+const BASE_SIZE := 320.0
+const BASE_IMAGE_SCALE := Vector2(0.403252, 0.403252)
 const MAX_VISIBLE_INFLATION := 1.8
 const GRAB_TEXTURE_PATH := "res://assets/character/drag_hold.png"
+const STAND_TEXTURE: Texture2D = preload("res://assets/character/stand.png")
+
+static var _texture_bounds_cache: Dictionary = {}
 
 var velocity := Vector2.ZERO
 var mode := PetBehavior.Mode.DVD_BOUNCE
@@ -27,6 +32,7 @@ func _ready() -> void:
 	image_sprite = get_node("CharacterImage") as Sprite2D
 	stand_texture = image_sprite.texture
 	grab_texture = load(GRAB_TEXTURE_PATH) as Texture2D if ResourceLoader.exists(GRAB_TEXTURE_PATH) else stand_texture
+	image_sprite.scale = BASE_IMAGE_SCALE
 	base_image_scale = image_sprite.scale
 	image_sprite.z_index = -1
 
@@ -83,18 +89,54 @@ func get_mouse_region() -> PackedVector2Array:
 	return window_points
 
 func get_content_bounds() -> Rect2:
-	var points := _content_outline()
+	if not is_instance_valid(image_sprite) or not is_instance_valid(image_sprite.texture):
+		return Rect2(position, Vector2.ZERO)
+	var texture_rect := _texture_local_bounds(image_sprite.texture)
+	var sprite_transform := Transform2D(image_sprite.rotation, image_sprite.scale, 0.0, image_sprite.position)
 	var minimum := Vector2(INF, INF)
 	var maximum := Vector2(-INF, -INF)
-	for point in points:
-		var transformed := position + Vector2(point.x * scale.x, point.y * scale.y)
+	for raw_point in [texture_rect.position, Vector2(texture_rect.end.x, texture_rect.position.y), texture_rect.end, Vector2(texture_rect.position.x, texture_rect.end.y)]:
+		var point := Vector2(raw_point)
+		var transformed: Vector2 = position + Vector2(sprite_transform * point) * scale
 		minimum.x = minf(minimum.x, transformed.x)
 		minimum.y = minf(minimum.y, transformed.y)
 		maximum.x = maxf(maximum.x, transformed.x)
 		maximum.y = maxf(maximum.y, transformed.y)
 	return Rect2(minimum, maximum - minimum)
 
-func _content_outline() -> PackedVector2Array:
+static func content_bounds_for_size(size: float) -> Rect2:
+	var display_scale := size / BASE_SIZE
+	var origin := Vector2(size * 0.55, size * 0.51)
+	var base_rect := _texture_local_bounds(STAND_TEXTURE)
+	var scale_factor := BASE_IMAGE_SCALE * display_scale
+	var local_rect := Rect2(base_rect.position * scale_factor, base_rect.size * scale_factor)
+	var minimum := Vector2(INF, INF)
+	var maximum := Vector2(-INF, -INF)
+	for raw_point in [local_rect.position, Vector2(local_rect.end.x, local_rect.position.y), local_rect.end, Vector2(local_rect.position.x, local_rect.end.y)]:
+		var point := Vector2(raw_point)
+		var transformed: Vector2 = origin + point
+		minimum.x = minf(minimum.x, transformed.x)
+		minimum.y = minf(minimum.y, transformed.y)
+		maximum.x = maxf(maximum.x, transformed.x)
+		maximum.y = maxf(maximum.y, transformed.y)
+	return Rect2(minimum, maximum - minimum)
+
+static func _texture_local_bounds(texture: Texture2D) -> Rect2:
+	var texture_id := texture.get_instance_id()
+	if _texture_bounds_cache.has(texture_id):
+		return _texture_bounds_cache[texture_id]
+	var image := texture.get_image()
+	var used_rect := image.get_used_rect()
+	if not used_rect.has_area():
+		used_rect = Rect2i(Vector2i.ZERO, Vector2i(texture.get_size()))
+	var local_rect := Rect2(
+		Vector2(used_rect.position) - Vector2(texture.get_size()) * 0.5,
+		Vector2(used_rect.size)
+	)
+	_texture_bounds_cache[texture_id] = local_rect
+	return local_rect
+
+static func _content_outline() -> PackedVector2Array:
 	return PackedVector2Array([
 		Vector2(-22, -120), Vector2(18, -122), Vector2(49, -101),
 		Vector2(69, -67), Vector2(78, -20), Vector2(75, 34),

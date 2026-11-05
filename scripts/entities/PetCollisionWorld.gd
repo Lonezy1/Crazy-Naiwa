@@ -1,5 +1,7 @@
 extends RefCounted
 
+const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
+
 const FIXED_STEP := 1.0 / 60.0
 const MAX_FRAME_STEPS := 8
 const MAX_FROG_SPEED := 1800.0
@@ -22,7 +24,15 @@ func has_motion() -> bool:
 			return true
 	return false
 
-func add_body(id: int, size: int, position: Vector2, work_area: Rect2i) -> void:
+func add_body(
+	id: int,
+	size: int,
+	position: Vector2,
+	work_area: Rect2i,
+	content_rect: Rect2 = Rect2()
+) -> void:
+	if content_rect.size.x <= 0.0 or content_rect.size.y <= 0.0:
+		content_rect = Rect2(Vector2.ZERO, Vector2.ONE * size)
 	bodies.append({
 		"id": id,
 		"size": size,
@@ -32,7 +42,9 @@ func add_body(id: int, size: int, position: Vector2, work_area: Rect2i) -> void:
 		"drag_target": position,
 		"grab_offset": Vector2.ZERO,
 		"work_area": work_area,
+		"content_rect": content_rect,
 	})
+	set_content_rect(id, content_rect)
 
 func remove_body(id: int) -> void:
 	for index in range(bodies.size() - 1, -1, -1):
@@ -45,6 +57,18 @@ func get_body(id: int) -> Dictionary:
 		if int(body["id"]) == id:
 			return body
 	return {}
+
+func set_content_rect(id: int, content_rect: Rect2) -> void:
+	var body := get_body(id)
+	if body.is_empty():
+		return
+	if content_rect.size.x <= 0.0 or content_rect.size.y <= 0.0:
+		var size := int(body["size"])
+		content_rect = Rect2(Vector2.ZERO, Vector2.ONE * size)
+	body["content_rect"] = content_rect
+	var area: Rect2i = body["work_area"]
+	body["position"] = _clamp_position(body["position"], area, content_rect)
+	body["drag_target"] = _clamp_position(body["drag_target"], area, content_rect)
 
 func begin_drag(id: int, pointer_position: Vector2) -> bool:
 	var body := get_body(id)
@@ -95,7 +119,9 @@ func set_size(id: int, size: int) -> void:
 	var old_size := int(body["size"])
 	var center := Vector2(body["position"]) + Vector2(old_size, old_size) * 0.5
 	body["size"] = size
-	body["position"] = _clamp_position(center - Vector2(size, size) * 0.5, body["work_area"], size)
+	body["position"] = _clamp_position(
+		center - Vector2(size, size) * 0.5, body["work_area"], body["content_rect"]
+	)
 	body["drag_target"] = body["position"]
 
 func advance(delta: float, work_areas: Array[Rect2i]) -> Array[int]:
@@ -154,43 +180,46 @@ func _advance_fixed(delta: float, work_areas: Array[Rect2i]) -> Array[int]:
 	return _unique_ids(collided_ids)
 
 func _resolve_boundaries(body: Dictionary, work_areas: Array[Rect2i], collided_ids: Array[int]) -> void:
-	var size := int(body["size"])
+	var content_rect: Rect2 = body["content_rect"]
 	var area: Rect2i = body["work_area"]
-	var center := Vector2(body["position"]) + Vector2(size, size) * 0.5
+	var center := Vector2(body["position"]) + content_rect.get_center()
 	for candidate in work_areas:
 		if candidate.has_point(Vector2i(roundi(center.x), roundi(center.y))):
 			area = candidate
 			break
 	body["work_area"] = area
-	var maximum := Vector2(
-		maxi(area.position.x, area.end.x - size),
-		maxi(area.position.y, area.end.y - size)
-	)
+	var limits := DesktopBounds.content_position_limits(area, content_rect)
+	var minimum: Vector2 = limits.minimum
+	var maximum: Vector2 = limits.maximum
 	var position: Vector2 = body["position"]
 	var velocity: Vector2 = body["velocity"]
 	var dragged := bool(body["dragged"])
-	if position.x < area.position.x or position.x > maximum.x:
+	var hit_left := position.x < minimum.x
+	var hit_right := position.x > maximum.x
+	if hit_left or hit_right:
 		var hit_speed := absf(velocity.x)
-		position.x = clampf(position.x, area.position.x, maximum.x)
+		position.x = clampf(position.x, minimum.x, maximum.x)
 		if dragged:
 			velocity.x = 0.0
 		else:
-			velocity.x = absf(velocity.x) * EDGE_RESTITUTION if position.x <= area.position.x else -absf(velocity.x) * EDGE_RESTITUTION
+			velocity.x = absf(velocity.x) * EDGE_RESTITUTION if hit_left else -absf(velocity.x) * EDGE_RESTITUTION
 		if hit_speed > STOP_SPEED:
 			_collide_id(collided_ids, int(body["id"]))
-	if position.y < area.position.y or position.y > maximum.y:
+	var hit_top := position.y < minimum.y
+	var hit_bottom := position.y > maximum.y
+	if hit_top or hit_bottom:
 		var hit_speed := absf(velocity.y)
-		position.y = clampf(position.y, area.position.y, maximum.y)
+		position.y = clampf(position.y, minimum.y, maximum.y)
 		if dragged:
 			velocity.y = 0.0
 		else:
-			velocity.y = absf(velocity.y) * EDGE_RESTITUTION if position.y <= area.position.y else -absf(velocity.y) * EDGE_RESTITUTION
+			velocity.y = absf(velocity.y) * EDGE_RESTITUTION if hit_top else -absf(velocity.y) * EDGE_RESTITUTION
 		if hit_speed > STOP_SPEED:
 			_collide_id(collided_ids, int(body["id"]))
 	body["position"] = position
 	body["velocity"] = velocity
 	if dragged:
-		body["drag_target"] = _clamp_position(body["drag_target"], area, size)
+		body["drag_target"] = _clamp_position(body["drag_target"], area, content_rect)
 
 func _resolve_pairs(collided_ids: Array[int]) -> void:
 	var restitution := clampf(BASE_RESTITUTION * collision_strength, 0.1, 0.97)
@@ -226,9 +255,8 @@ func _resolve_pairs(collided_ids: Array[int]) -> void:
 						_collide_id(collided_ids, int(first["id"]))
 						_collide_id(collided_ids, int(second["id"]))
 
-func _clamp_position(position: Vector2, area: Rect2i, size: int) -> Vector2:
-	var maximum := Vector2(maxi(area.position.x, area.end.x - size), maxi(area.position.y, area.end.y - size))
-	return Vector2(clampf(position.x, area.position.x, maximum.x), clampf(position.y, area.position.y, maximum.y))
+func _clamp_position(position: Vector2, area: Rect2i, content_rect: Rect2) -> Vector2:
+	return DesktopBounds.clamp_position_to_content(position, area, content_rect)
 
 func _collide_id(ids: Array[int], id: int) -> void:
 	if not ids.has(id):

@@ -6,10 +6,12 @@ signal drag_started
 signal drag_released
 
 const PetCollisionWorld = preload("res://scripts/entities/PetCollisionWorld.gd")
+const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetAudio = preload("res://scripts/audio/PetAudio.gd")
+const FrogVisual = preload("res://scripts/entities/FrogVisual.gd")
 const FROG_WINDOW_SCENE = preload("res://scenes/FrogPetWindow.tscn")
 const BASE_SIZE := 320
 const MIN_SIZE := 48
@@ -45,7 +47,13 @@ func initialize_primary(pet_window: Window, visual: Node2D, behavior: PetBehavio
 	_visuals[0] = visual
 	var size := clampi(_settings.frog_size, MIN_SIZE, MAX_SIZE)
 	var position := Vector2(pet_window.position)
-	world.add_body(0, size, position, _work_area_for_position(position, size))
+	world.add_body(
+		0,
+		size,
+		position,
+		_work_area_for_position(position, size),
+		visual.call("get_content_bounds")
+	)
 	_apply_size(0, size)
 
 func restore_small_pets(saved_pets: Array[Dictionary]) -> void:
@@ -60,7 +68,6 @@ func restore_small_pets(saved_pets: Array[Dictionary]) -> void:
 			continue
 		var position := Vector2(saved_position)
 		var area := _work_area_for_position(position, size)
-		position = _clamp_window_position(position, area, size)
 		_create_pet(id, size, position, area)
 		_next_id = maxi(_next_id, id + 1)
 		restored += 1
@@ -217,13 +224,26 @@ func sync_primary_position(position: Vector2) -> void:
 	var body := world.get_body(0)
 	if body.is_empty():
 		return
+	var primary_visual: Node2D = _visuals.get(0)
+	if is_instance_valid(primary_visual):
+		world.set_content_rect(0, primary_visual.call("get_content_bounds"))
+	body = world.get_body(0)
+	var size := int(body["size"])
+	var area := _work_area_for_position(position, size)
+	body["work_area"] = area
+	position = DesktopBounds.clamp_position_to_content(position, area, body["content_rect"])
 	body["position"] = position
 	body["drag_target"] = position
-	body["work_area"] = _work_area_for_position(position, int(body["size"]))
+	var primary_window: Window = _windows.get(0)
+	if is_instance_valid(primary_window):
+		primary_window.position = Vector2i(roundi(position.x), roundi(position.y))
+	if is_instance_valid(_behavior):
+		_behavior.window_position = position
 
 func _process(delta: float) -> void:
 	if not _active or world.bodies.size() < 2:
 		return
+	_refresh_content_bounds()
 	if _pointer_down:
 		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
 			pointer_release(DisplayServer.mouse_get_position())
@@ -250,13 +270,12 @@ func _create_pet(id: int, size: int, position: Vector2, area: Rect2i) -> void:
 	var pet_window := FROG_WINDOW_SCENE.instantiate() as Window
 	pet_window.call("configure", self, id, size)
 	pet_window.visible = false
-	pet_window.position = Vector2i(roundi(position.x), roundi(position.y))
 	get_tree().root.add_child(pet_window)
-	pet_window.position = Vector2i(roundi(position.x), roundi(position.y))
-	pet_window.visible = true
 	_windows[id] = pet_window
 	_visuals[id] = pet_window.get("visual")
-	world.add_body(id, size, position, area)
+	world.add_body(id, size, position, area, FrogVisual.content_bounds_for_size(float(size)))
+	_apply_size(id, size)
+	pet_window.visible = true
 
 func _apply_size(id: int, size: int) -> void:
 	var body := world.get_body(id)
@@ -266,14 +285,15 @@ func _apply_size(id: int, size: int) -> void:
 		return
 	pet_window.content_scale_size = Vector2i(size, size)
 	pet_window.size = Vector2i(size, size)
-	pet_window.position = Vector2i(roundi(Vector2(body["position"]).x), roundi(Vector2(body["position"]).y))
-	if id == 0:
-		if is_instance_valid(_swarm):
-			_swarm.scale = Vector2.ONE * (float(size) / float(BASE_SIZE))
-		if is_instance_valid(_behavior):
-			_behavior.window_position = body["position"]
+	if id == 0 and is_instance_valid(_swarm):
+		_swarm.scale = Vector2.ONE * (float(size) / float(BASE_SIZE))
 	visual.position = Vector2(size * 0.55, size * 0.51)
 	visual.call("set_display_size_scale", float(size) / float(BASE_SIZE))
+	world.set_content_rect(id, visual.call("get_content_bounds"))
+	body = world.get_body(id)
+	pet_window.position = Vector2i(roundi(Vector2(body["position"]).x), roundi(Vector2(body["position"]).y))
+	if id == 0 and is_instance_valid(_behavior):
+		_behavior.window_position = body["position"]
 	if id == 0 and is_instance_valid(_swarm) and _swarm.visible:
 		pet_window.mouse_passthrough_polygon = PackedVector2Array([
 			Vector2.ZERO, Vector2(size, 0), Vector2(size, size), Vector2(0, size)
@@ -310,6 +330,12 @@ func _sync_windows() -> void:
 		if id == 0 and is_instance_valid(_behavior):
 			_behavior.window_position = position
 
+func _refresh_content_bounds() -> void:
+	for id in _visuals:
+		var visual: Node2D = _visuals[id]
+		if is_instance_valid(visual):
+			world.set_content_rect(int(id), visual.call("get_content_bounds"))
+
 func _set_active(value: bool) -> void:
 	if _active == value:
 		return
@@ -325,7 +351,11 @@ func _find_spawn_position(parent_position: Vector2, parent_size: int, child_size
 	var best_position := parent_position
 	var least_overlap := INF
 	for direction in directions:
-		var candidate := _clamp_window_position(parent_center + direction * distance - Vector2(child_size, child_size) * 0.5, area, child_size)
+		var candidate := _clamp_pet_position(
+			parent_center + direction * distance - Vector2(child_size, child_size) * 0.5,
+			area,
+			child_size
+		)
 		var overlap := 0.0
 		for body in world.bodies:
 			var other_size := int(body["size"])
@@ -353,9 +383,12 @@ func _work_area_for_position(position: Vector2, size: int) -> Rect2i:
 			return area
 	return DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())
 
-func _clamp_window_position(position: Vector2, area: Rect2i, size: int) -> Vector2:
-	var maximum := Vector2(maxi(area.position.x, area.end.x - size), maxi(area.position.y, area.end.y - size))
-	return Vector2(clampf(position.x, area.position.x, maximum.x), clampf(position.y, area.position.y, maximum.y))
+func _clamp_pet_position(position: Vector2, area: Rect2i, size: int) -> Vector2:
+	return DesktopBounds.clamp_position_to_content(
+		position,
+		area,
+		FrogVisual.content_bounds_for_size(float(size))
+	)
 
 func _refresh_all_menus() -> void:
 	fleet_changed.emit()

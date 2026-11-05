@@ -8,5 +8,4 @@ script = ExtResource("1_visual")
 
 [node name="CharacterImage" type="Sprite2D" parent="."]
 texture = ExtResource("2_stand")
-scale = Vector2(0.403252, 0.403252)
 z_index = -1

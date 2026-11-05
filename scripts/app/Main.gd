@@ -7,7 +7,7 @@ const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
 const PetAudio = preload("res://scripts/audio/PetAudio.gd")
 const PetFleet = preload("res://scripts/entities/PetFleet.gd")
-const PET_EDGE_MARGIN := 2.0
+const PET_EDGE_MARGIN := DesktopBounds.CONTENT_EDGE_MARGIN
 
 var behavior := PetBehavior.new()
 var gesture := PetGesture.new()

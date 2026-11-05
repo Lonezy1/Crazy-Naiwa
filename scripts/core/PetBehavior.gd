@@ -9,7 +9,7 @@ const THROW_SPEED_THRESHOLD := 720.0
 const MAX_THROW_SPEED := 1100.0
 const THROW_SPEED_SCALE := 0.95
 const FLOAT_ASCEND_SPEED := 900.0
-const CONTENT_EDGE_MARGIN := 2.0
+const CONTENT_EDGE_MARGIN := DesktopBounds.CONTENT_EDGE_MARGIN
 
 var enabled := true
 var mode := Mode.DVD_BOUNCE

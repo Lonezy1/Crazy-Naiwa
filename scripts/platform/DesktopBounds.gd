@@ -1,6 +1,6 @@
 extends RefCounted
 
-const CONTENT_EDGE_MARGIN := 2.0
+const CONTENT_EDGE_MARGIN := 1.0
 
 static func current_work_area() -> Rect2i:
 	return DisplayServer.screen_get_usable_rect(DisplayServer.window_get_current_screen())

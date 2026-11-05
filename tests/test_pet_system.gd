@@ -6,6 +6,7 @@ const FrogVisualScene = preload("res://scenes/FrogVisual.tscn")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
+const PetThrowProfile = preload("res://scripts/core/PetThrowProfile.gd")
 const PetSwarm = preload("res://scripts/entities/PetSwarm.gd")
 const PetAudio = preload("res://scripts/audio/PetAudio.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
@@ -43,8 +44,10 @@ func _test_settings() -> void:
 	saved.sound_enabled = false
 	saved.sfx_volume = 0.25
 	saved.long_press_mode = PetSettingsStore.LongPressMode.TOSS
-	saved.throw_strength = 1.8
-	saved.throw_damping = 6.0
+	saved.throw_style = PetThrowProfile.Style.MADNESS
+	saved.throw_duration_seconds = PetThrowProfile.Duration.CONTINUOUS
+	saved.throw_strength = 4.0
+	saved.throw_damping = 8.0
 	saved.throw_gravity_scale = 1.25
 	saved.throw_bounce = 0.35
 	saved.frog_size = 544
@@ -63,8 +66,10 @@ func _test_settings() -> void:
 	_expect(not loaded.sound_enabled, "settings preserve sound_enabled")
 	_expect(is_equal_approx(loaded.sfx_volume, 0.25), "settings preserve sfx_volume")
 	_expect(loaded.long_press_mode == PetSettingsStore.LongPressMode.TOSS, "settings preserve long press mode")
-	_expect(is_equal_approx(loaded.throw_strength, 1.8), "settings preserve throw strength")
-	_expect(is_equal_approx(loaded.throw_damping, 6.0), "settings preserve throw damping")
+	_expect(loaded.throw_style == PetThrowProfile.Style.MADNESS, "settings preserve throw style")
+	_expect(loaded.throw_duration_seconds == PetThrowProfile.Duration.CONTINUOUS, "settings preserve continuous throw duration")
+	_expect(is_equal_approx(loaded.throw_strength, 4.0), "settings preserve throw strength")
+	_expect(is_equal_approx(loaded.throw_damping, 8.0), "settings preserve throw damping")
 	_expect(is_equal_approx(loaded.throw_gravity_scale, 1.25), "settings preserve throw gravity scale")
 	_expect(is_equal_approx(loaded.throw_bounce, 0.35), "settings preserve throw bounce")
 	_expect(loaded.frog_size == 544, "settings preserve primary frog size")
@@ -78,6 +83,20 @@ func _test_settings() -> void:
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
 	saved.free()
 	loaded.free()
+	var preset_settings := PetSettingsStore.new()
+	preset_settings.set_throw_style(PetThrowProfile.Style.BOUNCY)
+	_expect(
+		is_equal_approx(preset_settings.throw_strength, 2.5)
+			and is_equal_approx(preset_settings.throw_damping, 0.5)
+			and is_equal_approx(preset_settings.throw_gravity_scale, 0.75)
+			and is_equal_approx(preset_settings.throw_bounce, 0.95),
+		"selecting bouncy style applies its complete preset"
+	)
+	preset_settings.set_throw_duration(PetThrowProfile.Duration.THIRTY_SECONDS)
+	_expect(preset_settings.throw_duration_seconds == 30, "settings accept a supported throw duration")
+	preset_settings.set_throw_duration(7)
+	_expect(preset_settings.throw_duration_seconds == 30, "settings ignore unsupported throw durations")
+	preset_settings.free()
 
 func _test_gestures() -> void:
 	var gesture := PetGesture.new()
@@ -184,19 +203,36 @@ func _test_audio_and_menu() -> void:
 	)
 	menu.refresh_state(
 		true, true, true, 0.5, 0, PetSettingsStore.LongPressMode.MOVE,
-		320, 0, true, 1.0, true, 1.5, 6.0, 1.25, 0.35
+		320, 0, true, 1.0, true, 4.0, 8.0, 1.25, 0.35,
+		PetThrowProfile.Style.MADNESS, PetThrowProfile.Duration.THIRTY_SECONDS, true
 	)
 	_expect(
-		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.DAMPING]["menu"].is_item_checked(3),
+		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.DAMPING]["menu"].is_item_checked(8),
 		"throw damping menu reflects the selected value"
 	)
 	_expect(
-		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.GRAVITY_SCALE]["menu"].is_item_checked(3),
+		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.GRAVITY_SCALE]["menu"].is_item_checked(5),
 		"throw gravity menu reflects the selected value"
 	)
 	_expect(
 		menu.throw_tuning_menus[PetSettingsStore.ThrowTuning.BOUNCE]["menu"].is_item_checked(1),
 		"throw bounce menu reflects the selected value"
+	)
+	_expect(
+		menu.throw_style_menu.is_item_checked(PetThrowProfile.Style.MADNESS)
+			and not throw_group.is_item_disabled(throw_group.get_item_index(PetContextMenu.Command.THROW_DURATION)),
+		"madness style enables and reflects its duration option"
+	)
+	_expect(
+		menu.throw_duration_menu.is_item_checked(
+			menu.throw_duration_menu.get_item_index(PetThrowProfile.Duration.THIRTY_SECONDS)
+		),
+		"madness duration menu reflects the selected timeout"
+	)
+	var behavior_menu: PopupMenu = menu.get_node("BehaviorMenu")
+	_expect(
+		not behavior_menu.is_item_disabled(behavior_menu.get_item_index(PetContextMenu.Command.STOP_THROW)),
+		"active madness mode enables the explicit stop command"
 	)
 	menu.refresh_state(true, false, true, 0.5, 50, PetSettingsStore.LongPressMode.TOSS)
 	_expect(not preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_ANTICS)), "menu reflects resumed state")
@@ -209,19 +245,27 @@ func _test_audio_and_menu() -> void:
 	_expect(selected_mode[0] == PetSettingsStore.LongPressMode.TOSS, "long press menu emits selected mode")
 	var selected_throw_strength := [0.0]
 	menu.throw_strength_selected.connect(func(value: float) -> void: selected_throw_strength[0] = value)
-	menu._on_throw_strength_id_pressed(54)
-	_expect(is_equal_approx(selected_throw_strength[0], 1.8), "throw strength menu emits selected multiplier")
+	menu._on_throw_strength_id_pressed(58)
+	_expect(is_equal_approx(selected_throw_strength[0], 6.0), "throw strength menu emits selected multiplier")
+	var selected_style := [-1]
+	menu.throw_style_selected.connect(func(value: int) -> void: selected_style[0] = value)
+	menu._on_throw_style_id_pressed(PetThrowProfile.Style.BOUNCY)
+	_expect(selected_style[0] == PetThrowProfile.Style.BOUNCY, "throw style menu emits its selected preset")
+	var selected_duration := [-1]
+	menu.throw_duration_selected.connect(func(value: int) -> void: selected_duration[0] = value)
+	menu._on_throw_duration_id_pressed(PetThrowProfile.Duration.CONTINUOUS)
+	_expect(selected_duration[0] == PetThrowProfile.Duration.CONTINUOUS, "throw duration menu emits continuous mode")
 	var selected_tuning := [-1, 0.0]
 	menu.throw_tuning_selected.connect(func(tuning: int, value: float) -> void:
 		selected_tuning[0] = tuning
 		selected_tuning[1] = value
 	)
-	menu._on_throw_tuning_id_pressed(3, PetSettingsStore.ThrowTuning.DAMPING)
+	menu._on_throw_tuning_id_pressed(8, PetSettingsStore.ThrowTuning.DAMPING)
 	_expect(
-		selected_tuning[0] == PetSettingsStore.ThrowTuning.DAMPING and is_equal_approx(selected_tuning[1], 6.0),
+		selected_tuning[0] == PetSettingsStore.ThrowTuning.DAMPING and is_equal_approx(selected_tuning[1], 8.0),
 		"throw tuning menu emits its parameter and selected value"
 	)
-	_expect(throw_group.get_item_count() == 5, "throw controls are grouped into one expandable submenu")
+	_expect(throw_group.get_item_count() == 7, "throw controls are grouped into one expandable submenu")
 	_expect(throw_group.get_item_icon(throw_damping_row) == null, "detailed throw controls avoid redundant row icons")
 	menu.queue_free()
 	var pet_menu := PetContextMenu.new()
@@ -418,11 +462,69 @@ func _test_behavior() -> void:
 	var bounded_tuning := PetBehavior.new()
 	bounded_tuning.set_throw_physics(99.0, -1.0, 2.0)
 	_expect(
-		is_equal_approx(bounded_tuning.throw_damping, 12.0)
-			and is_equal_approx(bounded_tuning.throw_gravity_scale, 0.25)
+		is_equal_approx(bounded_tuning.throw_damping, 8.0)
+			and is_equal_approx(bounded_tuning.throw_gravity_scale, 0.1)
 			and is_equal_approx(bounded_tuning.throw_bounce, 1.0),
 		"throw physics clamps values to valid ranges"
 	)
+	var bouncy_fling := PetBehavior.new()
+	bouncy_fling.initialize(Vector2(1000, 1000))
+	bouncy_fling.set_throw_mode(PetThrowProfile.Style.BOUNCY, PetThrowProfile.Duration.TEN_SECONDS)
+	bouncy_fling.set_throw_physics(0.5, 0.75, 0.95)
+	bouncy_fling.begin_drag(Vector2.ZERO)
+	bouncy_fling.end_drag(fling_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	bouncy_fling.advance(5.0, fling_area, window_size)
+	_expect(
+		bouncy_fling.fling_active and bouncy_fling.mode == PetBehavior.Mode.LAUNCH,
+		"bouncy preset lasts longer than the standard fling window"
+	)
+	_expect(is_equal_approx(bouncy_fling.mode_time, 25.0), "bouncy preset runs for thirty seconds")
+	var madness_fling := PetBehavior.new()
+	var endless_area := Rect2i(0, 0, 100000, 100000)
+	madness_fling.initialize(Vector2(1000, 1000))
+	madness_fling.set_throw_mode(PetThrowProfile.Style.MADNESS, PetThrowProfile.Duration.CONTINUOUS)
+	madness_fling.set_throw_physics(0.0, 0.5, 1.0)
+	madness_fling.begin_drag(Vector2.ZERO)
+	madness_fling.end_drag(endless_area, window_size, Vector2(3000.0, 0.0), Vector2.ZERO, true, 1.0)
+	madness_fling.advance(6.0, endless_area, window_size)
+	_expect(
+		madness_fling.fling_active and madness_fling.mode == PetBehavior.Mode.LAUNCH,
+		"continuous madness mode does not expire after the standard timeout"
+	)
+	_expect(
+		madness_fling.velocity.length() <= PetBehavior.MAX_THROW_SPEED,
+		"madness mode keeps velocity within the safety cap"
+	)
+	var settled_madness := PetBehavior.new()
+	settled_madness.initialize(Vector2(1000.0, 99680.0))
+	settled_madness.set_throw_mode(
+		PetThrowProfile.Style.MADNESS,
+		PetThrowProfile.Duration.CONTINUOUS
+	)
+	settled_madness.set_throw_physics(0.0, 0.1, 1.0)
+	settled_madness.mode = PetBehavior.Mode.LAUNCH
+	settled_madness.mode_time = INF
+	settled_madness.fling_active = true
+	settled_madness.velocity = Vector2.ZERO
+	settled_madness.advance(0.01, endless_area, window_size)
+	_expect(
+		settled_madness.fling_active and settled_madness.mode == PetBehavior.Mode.LAUNCH,
+		"continuous madness stays active when the pet settles against an edge"
+	)
+	_expect(madness_fling.stop_throw(), "explicit stop command cancels continuous madness mode")
+	_expect(
+		not madness_fling.fling_active and madness_fling.mode == PetBehavior.Mode.IDLE
+			and madness_fling.velocity.is_zero_approx(),
+		"stopping madness mode leaves the pet safely at rest"
+	)
+	var timed_madness := PetBehavior.new()
+	timed_madness.initialize(Vector2(1000, 1000))
+	timed_madness.set_throw_mode(PetThrowProfile.Style.MADNESS, PetThrowProfile.Duration.TEN_SECONDS)
+	timed_madness.set_throw_physics(0.0, 0.1, 1.0)
+	timed_madness.begin_drag(Vector2.ZERO)
+	timed_madness.end_drag(endless_area, window_size, Vector2(1000.0, 0.0), Vector2.ZERO, true, 1.0)
+	timed_madness.advance(10.1, endless_area, window_size)
+	_expect(not timed_madness.fling_active, "timed madness mode stops when its selected duration expires")
 
 	behavior.set_enabled(false)
 	behavior.initialize(Vector2(100, 200))

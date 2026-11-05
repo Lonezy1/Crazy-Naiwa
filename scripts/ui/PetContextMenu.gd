@@ -2,6 +2,7 @@ extends PopupMenu
 
 const PetTheme = preload("res://scripts/ui/PetTheme.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
+const PetThrowProfile = preload("res://scripts/core/PetThrowProfile.gd")
 
 enum Command {
 	DVD_BOUNCE = 1,
@@ -17,9 +18,12 @@ enum Command {
 	SFX_VOLUME,
 	LONG_PRESS_MODE,
 	THROW_STRENGTH,
+	THROW_STYLE,
+	THROW_DURATION,
 	THROW_DAMPING,
 	THROW_GRAVITY,
 	THROW_BOUNCE,
+	STOP_THROW,
 	SPAWN_SMALL_PET,
 	CLEAR_SMALL_PETS,
 	REMOVE_THIS_PET,
@@ -53,6 +57,8 @@ signal setting_selected(setting: int, enabled: bool)
 signal volume_selected(value: float)
 signal long_press_mode_selected(mode: int)
 signal throw_strength_selected(value: float)
+signal throw_style_selected(style: int)
+signal throw_duration_selected(seconds: int)
 signal throw_tuning_selected(tuning: int, value: float)
 signal fleet_command_selected(command: int)
 signal size_selected(size: int)
@@ -73,6 +79,8 @@ const VOLUME_OPTIONS := [
 var volume_menu: PopupMenu
 var long_press_menu: PopupMenu
 var throw_strength_menu: PopupMenu
+var throw_style_menu: PopupMenu
+var throw_duration_menu: PopupMenu
 var throw_tuning_menus: Dictionary = {}
 var size_menu: PopupMenu
 var collision_menu: PopupMenu
@@ -100,10 +108,13 @@ func refresh_state(
 	collisions_enabled: bool = true,
 	collision_strength: float = 1.0,
 	can_spawn: bool = true,
-	throw_strength: float = PetSettingsStore.DEFAULT_THROW_STRENGTH,
-	throw_damping: float = PetSettingsStore.DEFAULT_THROW_DAMPING,
-	throw_gravity_scale: float = PetSettingsStore.DEFAULT_THROW_GRAVITY_SCALE,
-	throw_bounce: float = PetSettingsStore.DEFAULT_THROW_BOUNCE
+	throw_strength: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["strength"],
+	throw_damping: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["damping"],
+	throw_gravity_scale: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["gravity_scale"],
+	throw_bounce: float = PetThrowProfile.PRESETS[PetThrowProfile.Style.STANDARD]["bounce"],
+	throw_style: int = PetThrowProfile.DEFAULT_STYLE,
+	throw_duration_seconds: int = PetThrowProfile.DEFAULT_DURATION,
+	throw_active: bool = false
 ) -> void:
 	_antics_enabled = antics_enabled
 	_always_on_top = always_on_top
@@ -117,9 +128,13 @@ func refresh_state(
 		_set_volume_checked(sfx_volume)
 		_set_long_press_mode_checked(long_press_mode)
 		_set_throw_strength_checked(throw_strength)
+		_set_throw_style_checked(throw_style)
+		_set_throw_duration_checked(throw_duration_seconds)
 		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.DAMPING, throw_damping)
 		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.GRAVITY_SCALE, throw_gravity_scale)
 		_set_throw_tuning_checked(PetSettingsStore.ThrowTuning.BOUNCE, throw_bounce)
+		_set_disabled(Command.THROW_DURATION, throw_style != PetThrowProfile.Style.MADNESS)
+	_set_disabled(Command.STOP_THROW, not throw_active)
 	if size_menu:
 		_set_size_checked(frog_size)
 	if collision_menu:
@@ -139,6 +154,8 @@ func _build_items() -> void:
 	_add_item(behavior_menu, "立即蛄蛹", Command.SLITHER)
 	_add_item(behavior_menu, "顶端坠落", Command.FLOAT_FALL)
 	_add_item(behavior_menu, "回到屏幕右下角", Command.MOVE_TO_CORNER)
+	behavior_menu.add_separator()
+	_add_item(behavior_menu, "停止甩飞", Command.STOP_THROW)
 
 	_build_throw_menu()
 
@@ -191,6 +208,26 @@ func _add_check_item(target_menu: PopupMenu, label: String, command: int) -> voi
 
 func _build_throw_menu() -> void:
 	var throw_menu := _build_group("甩动手感", "ThrowMenu", 1)
+	throw_style_menu = PopupMenu.new()
+	throw_style_menu.name = "ThrowStyleMenu"
+	throw_style_menu.theme = theme
+	throw_style_menu.add_radio_check_item("标准", PetThrowProfile.Style.STANDARD)
+	throw_style_menu.add_radio_check_item("弹力球", PetThrowProfile.Style.BOUNCY)
+	throw_style_menu.add_radio_check_item("疯癫循环", PetThrowProfile.Style.MADNESS)
+	throw_style_menu.id_pressed.connect(_on_throw_style_id_pressed)
+	add_child(throw_style_menu)
+	_add_submenu(throw_menu, "玩法风格", throw_style_menu, Command.THROW_STYLE)
+
+	throw_duration_menu = PopupMenu.new()
+	throw_duration_menu.name = "ThrowDurationMenu"
+	throw_duration_menu.theme = theme
+	throw_duration_menu.add_radio_check_item("10 秒", PetThrowProfile.Duration.TEN_SECONDS)
+	throw_duration_menu.add_radio_check_item("30 秒", PetThrowProfile.Duration.THIRTY_SECONDS)
+	throw_duration_menu.add_radio_check_item("持续运行", PetThrowProfile.Duration.CONTINUOUS)
+	throw_duration_menu.id_pressed.connect(_on_throw_duration_id_pressed)
+	add_child(throw_duration_menu)
+	_add_submenu(throw_menu, "疯癫时长", throw_duration_menu, Command.THROW_DURATION)
+
 	long_press_menu = PopupMenu.new()
 	long_press_menu.name = "LongPressModeMenu"
 	long_press_menu.theme = theme
@@ -203,8 +240,8 @@ func _build_throw_menu() -> void:
 	throw_strength_menu = PopupMenu.new()
 	throw_strength_menu.name = "ThrowStrengthMenu"
 	throw_strength_menu.theme = theme
-	for index in range(PetSettingsStore.THROW_STRENGTH_OPTIONS.size()):
-		var strength: float = PetSettingsStore.THROW_STRENGTH_OPTIONS[index]
+	for index in range(PetThrowProfile.STRENGTH_OPTIONS.size()):
+		var strength: float = PetThrowProfile.STRENGTH_OPTIONS[index]
 		throw_strength_menu.add_radio_check_item("%d%%" % roundi(strength * 100.0), 50 + index)
 	throw_strength_menu.id_pressed.connect(_on_throw_strength_id_pressed)
 	add_child(throw_strength_menu)
@@ -216,7 +253,7 @@ func _build_throw_menu() -> void:
 		Command.THROW_DAMPING,
 		"甩飞阻尼",
 		"ThrowDampingMenu",
-		PetSettingsStore.THROW_DAMPING_OPTIONS
+		PetThrowProfile.DAMPING_OPTIONS
 	)
 	_build_throw_tuning_menu(
 		throw_menu,
@@ -224,7 +261,7 @@ func _build_throw_menu() -> void:
 		Command.THROW_GRAVITY,
 		"甩飞重力",
 		"ThrowGravityMenu",
-		PetSettingsStore.THROW_GRAVITY_SCALE_OPTIONS,
+		PetThrowProfile.GRAVITY_SCALE_OPTIONS,
 		true
 	)
 	_build_throw_tuning_menu(
@@ -233,7 +270,7 @@ func _build_throw_menu() -> void:
 		Command.THROW_BOUNCE,
 		"边缘回弹",
 		"ThrowBounceMenu",
-		PetSettingsStore.THROW_BOUNCE_OPTIONS,
+		PetThrowProfile.BOUNCE_OPTIONS,
 		true,
 		true
 	)
@@ -297,10 +334,18 @@ func _on_long_press_mode_id_pressed(id: int) -> void:
 	if id == LongPressOption.MOVE or id == LongPressOption.TOSS:
 		long_press_mode_selected.emit(id)
 
+func _on_throw_style_id_pressed(id: int) -> void:
+	if id >= PetThrowProfile.Style.STANDARD and id <= PetThrowProfile.Style.MADNESS:
+		throw_style_selected.emit(id)
+
+func _on_throw_duration_id_pressed(id: int) -> void:
+	if PetThrowProfile.is_valid_duration(id):
+		throw_duration_selected.emit(id)
+
 func _on_throw_strength_id_pressed(id: int) -> void:
 	var option_index := id - 50
-	if option_index >= 0 and option_index < PetSettingsStore.THROW_STRENGTH_OPTIONS.size():
-		throw_strength_selected.emit(PetSettingsStore.THROW_STRENGTH_OPTIONS[option_index])
+	if option_index >= 0 and option_index < PetThrowProfile.STRENGTH_OPTIONS.size():
+		throw_strength_selected.emit(PetThrowProfile.STRENGTH_OPTIONS[option_index])
 
 func _on_throw_tuning_id_pressed(id: int, tuning: int) -> void:
 	var tuning_menu: PopupMenu = throw_tuning_menus.get(tuning, {}).get("menu")
@@ -338,11 +383,22 @@ func _set_long_press_mode_checked(value: int) -> void:
 func _set_throw_strength_checked(value: float) -> void:
 	if not throw_strength_menu:
 		return
-	for index in range(PetSettingsStore.THROW_STRENGTH_OPTIONS.size()):
-		var strength: float = PetSettingsStore.THROW_STRENGTH_OPTIONS[index]
+	for index in range(PetThrowProfile.STRENGTH_OPTIONS.size()):
+		var strength: float = PetThrowProfile.STRENGTH_OPTIONS[index]
 		throw_strength_menu.set_item_checked(
 			throw_strength_menu.get_item_index(50 + index),
 			is_equal_approx(strength, value)
+		)
+
+func _set_throw_style_checked(value: int) -> void:
+	for style in range(throw_style_menu.get_item_count()):
+		throw_style_menu.set_item_checked(style, style == value)
+
+func _set_throw_duration_checked(value: int) -> void:
+	for index in range(throw_duration_menu.get_item_count()):
+		throw_duration_menu.set_item_checked(
+			index,
+			throw_duration_menu.get_item_id(index) == value
 		)
 
 func _set_throw_tuning_checked(tuning: int, value: float) -> void:

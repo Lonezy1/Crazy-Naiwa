@@ -1,12 +1,13 @@
 extends RefCounted
 
 const DesktopBounds = preload("res://scripts/platform/DesktopBounds.gd")
+const PetThrowProfile = preload("res://scripts/core/PetThrowProfile.gd")
 
 enum Mode { IDLE, DVD_BOUNCE, SLITHER, FLOAT, FALL, LAUNCH, DRAG }
 
 const MAX_POKE_COUNT := 10
 const THROW_SPEED_THRESHOLD := 360.0
-const MAX_THROW_SPEED := 6000.0
+const MAX_THROW_SPEED := PetThrowProfile.MAX_SPEED
 const THROW_SPEED_SCALE := 1.8
 const THROW_ACCELERATION_WINDOW := 0.055
 const MAX_ACCELERATION_SPEED_BONUS := 700.0
@@ -31,6 +32,10 @@ var mode_before_drag := Mode.DVD_BOUNCE
 var throw_damping := THROW_LINEAR_DAMPING
 var throw_gravity_scale := 1.0
 var throw_bounce := THROW_BOUNCE
+var throw_style := PetThrowProfile.Style.STANDARD
+var throw_duration_seconds := PetThrowProfile.DEFAULT_DURATION
+var throw_floor_bounce := 0.48
+var fling_active := false
 
 func initialize(initial_position: Vector2) -> void:
 	window_position = initial_position
@@ -98,30 +103,59 @@ func advance(
 				mode_time = 4.0
 				events.landed = true
 		Mode.LAUNCH:
-			velocity.y += THROW_GRAVITY * throw_gravity_scale * delta
-			velocity *= exp(-throw_damping * delta)
+			var gravity_scale := throw_gravity_scale if fling_active else 1.0
+			var damping := throw_damping if fling_active else THROW_LINEAR_DAMPING
+			velocity.y += THROW_GRAVITY * gravity_scale * delta
+			velocity = (velocity * exp(-damping * delta)).limit_length(MAX_THROW_SPEED)
 			var result := DesktopBounds.advance_bounce(
 				window_position, velocity, delta, work_area, window_size, content_rect, edge_margin
 			)
 			window_position = result.position
 			velocity = result.velocity
+			var restitution := throw_bounce if fling_active else THROW_BOUNCE
 			if result.hit_x:
-				velocity.x *= throw_bounce
+				velocity.x *= restitution
 			if result.hit_y:
-				velocity.y *= throw_bounce
+				velocity.y *= restitution
 			events.corner_hit = result.corner_hit
 			if result.corner_hit:
 				corner_flash_seconds = 1.0
 			if result.hit_y and velocity.y < 0.0:
-				velocity.y *= 0.48
-			if mode_time <= 0.0 or (result.hit_y and absf(velocity.y) < 70.0):
+				velocity.y *= throw_floor_bounce if fling_active else 0.48
+			var duration_expired := mode_time <= 0.0
+			var settled_on_edge: bool = bool(result["hit_y"]) and absf(velocity.y) < 70.0
+			var continuous_madness := (
+				fling_active
+				and throw_style == PetThrowProfile.Style.MADNESS
+				and throw_duration_seconds == PetThrowProfile.Duration.CONTINUOUS
+			)
+			if duration_expired or (not continuous_madness and settled_on_edge and velocity.length() < 70.0):
+				fling_active = false
 				_start_dvd_bounce()
 	return events
 
 func set_throw_physics(damping: float, gravity_scale: float, bounce: float) -> void:
-	throw_damping = clampf(damping, 0.5, 12.0)
-	throw_gravity_scale = clampf(gravity_scale, 0.25, 2.0)
+	throw_damping = clampf(damping, PetThrowProfile.DAMPING_OPTIONS[0], PetThrowProfile.DAMPING_OPTIONS[-1])
+	throw_gravity_scale = clampf(gravity_scale, PetThrowProfile.GRAVITY_SCALE_OPTIONS[0], PetThrowProfile.GRAVITY_SCALE_OPTIONS[-1])
 	throw_bounce = clampf(bounce, 0.0, 1.0)
+
+func set_throw_mode(style: int, duration_seconds: int) -> void:
+	throw_style = clampi(style, PetThrowProfile.Style.STANDARD, PetThrowProfile.Style.MADNESS)
+	throw_duration_seconds = duration_seconds if PetThrowProfile.is_valid_duration(duration_seconds) else PetThrowProfile.DEFAULT_DURATION
+	var preset := PetThrowProfile.get_preset(throw_style)
+	throw_floor_bounce = float(preset["floor_bounce"])
+	if fling_active:
+		var run_duration := throw_duration_seconds if throw_style == PetThrowProfile.Style.MADNESS else int(preset["duration_seconds"])
+		mode_time = INF if run_duration == PetThrowProfile.Duration.CONTINUOUS else float(run_duration)
+
+func stop_throw() -> bool:
+	if not fling_active:
+		return false
+	fling_active = false
+	mode = Mode.IDLE
+	mode_time = 0.0
+	velocity = Vector2.ZERO
+	return true
 
 func poke(
 	work_area: Rect2i,
@@ -142,6 +176,7 @@ func poke(
 		return {"heavy_fall": false, "burst": false, "inflation": inflation_scale}
 	inflation_hits = 0
 	inflation_scale = 1.0
+	fling_active = false
 	mode = Mode.LAUNCH
 	mode_time = 4.5
 	velocity = Vector2(randf_range(-440.0, 440.0), -560.0)
@@ -149,6 +184,7 @@ func poke(
 	return {"heavy_fall": false, "burst": true, "inflation": inflation_scale}
 
 func begin_drag(mouse_position: Vector2) -> void:
+	fling_active = false
 	mode_before_drag = mode
 	drag_total = Vector2.ZERO
 	drag_anchor = mouse_position
@@ -171,6 +207,7 @@ func end_drag(
 ) -> Dictionary:
 	window_position = _clamp_to_content(window_position, work_area, window_size, content_rect, edge_margin)
 	drag_total = Vector2.ZERO
+	fling_active = false
 	if not throw_mode_enabled:
 		mode = Mode.IDLE
 		velocity = Vector2.ZERO
@@ -184,10 +221,21 @@ func end_drag(
 		forward_acceleration * THROW_ACCELERATION_WINDOW,
 		MAX_ACCELERATION_SPEED_BONUS
 	)
-	var launch_speed := (release_speed + acceleration_bonus) * THROW_SPEED_SCALE * clampf(throw_strength, 0.5, 2.0)
+	var launch_speed := (
+		(release_speed + acceleration_bonus)
+		* THROW_SPEED_SCALE
+		* clampf(throw_strength, PetThrowProfile.STRENGTH_OPTIONS[0], PetThrowProfile.STRENGTH_OPTIONS[-1])
+	)
 	if launch_speed >= THROW_SPEED_THRESHOLD:
 		mode = Mode.LAUNCH
-		mode_time = 5.0
+		fling_active = true
+		match throw_style:
+			PetThrowProfile.Style.STANDARD:
+				mode_time = 5.0
+			PetThrowProfile.Style.BOUNCY:
+				mode_time = 30.0
+			PetThrowProfile.Style.MADNESS:
+				mode_time = INF if throw_duration_seconds == PetThrowProfile.Duration.CONTINUOUS else float(throw_duration_seconds)
 		velocity = launch_direction * minf(launch_speed, MAX_THROW_SPEED)
 		return {"action": "throw"}
 	mode = Mode.FALL
@@ -197,6 +245,7 @@ func end_drag(
 
 func set_enabled(value: bool) -> void:
 	enabled = value
+	fling_active = false
 	if enabled:
 		_start_dvd_bounce()
 	else:
@@ -209,12 +258,14 @@ func start_slither(
 	content_rect: Rect2 = Rect2(),
 	edge_margin: float = CONTENT_EDGE_MARGIN
 ) -> void:
+	fling_active = false
 	mode = Mode.SLITHER
 	mode_time = 7.0
 	velocity = Vector2(164.0 if velocity.x >= 0.0 else -164.0, 0.0)
 	window_position.y = _maximum_position(work_area, window_size, content_rect, edge_margin).y
 
 func start_float() -> void:
+	fling_active = false
 	mode = Mode.FLOAT
 	mode_time = 6.5
 	velocity = Vector2.ZERO
@@ -223,6 +274,7 @@ func start_dvd_bounce() -> void:
 	_start_dvd_bounce()
 
 func _start_dvd_bounce() -> void:
+	fling_active = false
 	mode = Mode.DVD_BOUNCE if enabled else Mode.IDLE
 	mode_time = randf_range(8.0, 14.0)
 	if velocity.length() < 70.0:

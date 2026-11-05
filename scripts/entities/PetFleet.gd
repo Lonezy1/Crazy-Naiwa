@@ -193,7 +193,7 @@ func is_active() -> bool:
 func get_small_pet_count() -> int:
 	return maxi(0, world.bodies.size() - 1)
 
-func refresh_menu(menu: PetContextMenu, clone_count: int = 0) -> void:
+func refresh_menu(menu: PetContextMenu, clone_count: int = 0, throw_active: bool = false) -> void:
 	menu.refresh_state(
 		_settings.antics_enabled,
 		_settings.always_on_top,
@@ -209,7 +209,10 @@ func refresh_menu(menu: PetContextMenu, clone_count: int = 0) -> void:
 		_settings.throw_strength,
 		_settings.throw_damping,
 		_settings.throw_gravity_scale,
-		_settings.throw_bounce
+		_settings.throw_bounce,
+		_settings.throw_style,
+		_settings.throw_duration_seconds,
+		throw_active
 	)
 
 func persist_state() -> void:

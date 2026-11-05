@@ -37,11 +37,7 @@ func _ready() -> void:
 	_restore_window_position()
 	behavior.set_enabled(settings.antics_enabled)
 	behavior.initialize(Vector2(pet_window.position))
-	behavior.set_throw_physics(
-		settings.throw_damping,
-		settings.throw_gravity_scale,
-		settings.throw_bounce
-	)
+	_sync_throw_configuration()
 	swarm.set_simulation_enabled(settings.antics_enabled)
 	audio = PetAudio.new()
 	audio.name = "PetAudio"
@@ -155,6 +151,8 @@ func _build_menu() -> void:
 	menu.volume_selected.connect(_on_menu_volume_selected)
 	menu.long_press_mode_selected.connect(_on_long_press_mode_selected)
 	menu.throw_strength_selected.connect(_on_throw_strength_selected)
+	menu.throw_style_selected.connect(_on_throw_style_selected)
+	menu.throw_duration_selected.connect(_on_throw_duration_selected)
 	menu.throw_tuning_selected.connect(_on_throw_tuning_selected)
 	menu.fleet_command_selected.connect(_on_fleet_command_selected)
 	menu.size_selected.connect(_on_frog_size_selected)
@@ -192,6 +190,9 @@ func _on_menu_pressed(id: int) -> void:
 		PetContextMenu.Command.MOVE_TO_CORNER:
 			_move_to_corner()
 			audio.play_effect(PetAudio.Effect.MENU_CLICK)
+		PetContextMenu.Command.STOP_THROW:
+			if behavior.stop_throw():
+				audio.play_effect(PetAudio.Effect.DRAG_RELEASE)
 		PetContextMenu.Command.QUIT:
 			_save_settings()
 			get_tree().quit()
@@ -234,6 +235,20 @@ func _on_throw_strength_selected(value: float) -> void:
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)
 
+func _on_throw_style_selected(style: int) -> void:
+	settings.set_throw_style(style)
+	settings.save_settings()
+	_sync_throw_configuration()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
+func _on_throw_duration_selected(seconds: int) -> void:
+	settings.set_throw_duration(seconds)
+	settings.save_settings()
+	_sync_throw_configuration()
+	_refresh_menu_state()
+	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
 func _on_throw_tuning_selected(tuning: int, value: float) -> void:
 	match tuning:
 		PetSettingsStore.ThrowTuning.DAMPING:
@@ -250,6 +265,14 @@ func _on_throw_tuning_selected(tuning: int, value: float) -> void:
 	settings.save_settings()
 	_refresh_menu_state()
 	audio.play_effect(PetAudio.Effect.MENU_CLICK)
+
+func _sync_throw_configuration() -> void:
+	behavior.set_throw_physics(
+		settings.throw_damping,
+		settings.throw_gravity_scale,
+		settings.throw_bounce
+	)
+	behavior.set_throw_mode(settings.throw_style, settings.throw_duration_seconds)
 
 func _on_fleet_command_selected(command: int) -> void:
 	fleet.handle_pet_command(0, command)
@@ -389,4 +412,4 @@ func _exit_tree() -> void:
 func _refresh_menu_state() -> void:
 	if not menu:
 		return
-	fleet.refresh_menu(menu, swarm.get_clone_count())
+	fleet.refresh_menu(menu, swarm.get_clone_count(), behavior.fling_active)

@@ -5,6 +5,7 @@ const FrogVisual = preload("res://scripts/entities/FrogVisual.gd")
 const FrogVisualScene = preload("res://scenes/FrogVisual.tscn")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetImpact = preload("res://scripts/core/PetImpact.gd")
+const PetInteractions = preload("res://scripts/core/PetInteractions.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
 const PetThrowProfile = preload("res://scripts/core/PetThrowProfile.gd")
@@ -22,6 +23,7 @@ func _initialize() -> void:
 
 func _run_tests() -> void:
 	_test_settings()
+	_test_interactions()
 	_test_gestures()
 	await _test_audio_and_menu()
 	_test_desktop_bounds()
@@ -101,6 +103,53 @@ func _test_settings() -> void:
 	preset_settings.set_throw_duration(7)
 	_expect(preset_settings.throw_duration_seconds == 30, "settings ignore unsupported throw durations")
 	preset_settings.free()
+
+func _test_interactions() -> void:
+	for pet_size in [320, 461, 544, 640]:
+		var result_bounds := FrogVisual.result_card_bounds_for_size(float(pet_size))
+		_expect(
+			result_bounds.position.x >= 0.0
+				and result_bounds.position.y >= 0.0
+				and result_bounds.end.x <= float(pet_size)
+				and result_bounds.end.y <= float(pet_size),
+			"interaction result card stays inside the %dpx pet window" % pet_size
+		)
+	var first_rng := RandomNumberGenerator.new()
+	first_rng.seed = 7162
+	var second_rng := RandomNumberGenerator.new()
+	second_rng.seed = 7162
+	var first_fortune := PetInteractions.draw_fortune(first_rng)
+	var second_fortune := PetInteractions.draw_fortune(second_rng)
+	_expect(first_fortune == second_fortune, "seeded fortune draws are reproducible")
+	_expect(first_fortune["kind"] == PetInteractions.Kind.FORTUNE, "fortune result carries its interaction kind")
+	_expect(not str(first_fortune["badge"]).is_empty(), "fortune result has a visible badge")
+	_expect(not str(first_fortune["line_1"]).is_empty() and not str(first_fortune["line_2"]).is_empty(), "fortune result has two display lines")
+	var avatar_rng := RandomNumberGenerator.new()
+	avatar_rng.seed = 216
+	var avatar_image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	var avatar_texture := ImageTexture.create_from_image(avatar_image)
+	var avatar_result := PetInteractions.create_avatar_result(avatar_texture, avatar_rng)
+	_expect(avatar_result["kind"] == PetInteractions.Kind.AVATAR, "avatar feeding produces an avatar-specific result")
+	_expect(avatar_result["avatar_texture"] != avatar_texture, "avatar result creates a separate abstract sticker")
+	_expect((avatar_result["avatar_texture"] as Texture2D).get_size() == Vector2i(PetInteractions.AVATAR_SIZE, PetInteractions.AVATAR_SIZE), "avatar sticker stays within the thumbnail size")
+	_expect(PetInteractions.supports_image_path("friend.JPG"), "avatar import accepts uppercase JPEG extensions")
+	_expect(not PetInteractions.supports_image_path("friend.gif"), "avatar import rejects unsupported image formats")
+
+	var avatar_path := "user://crazy_naiwa_avatar_test.png"
+	var source := Image.create(4, 2, false, Image.FORMAT_RGBA8)
+	source.fill(Color.BLUE)
+	source.set_pixel(0, 0, Color.RED)
+	_expect(source.save_png(avatar_path) == OK, "avatar test fixture is saved")
+	var loaded := PetInteractions.load_avatar(ProjectSettings.globalize_path(avatar_path))
+	_expect(bool(loaded.get("ok", false)), "avatar importer accepts a valid local image")
+	if bool(loaded.get("ok", false)):
+		var image: Image = loaded["image"]
+		_expect(image.get_width() == PetInteractions.AVATAR_SIZE and image.get_height() == PetInteractions.AVATAR_SIZE, "avatar importer returns a bounded square thumbnail")
+		_expect(image.get_pixel(128, 128).b > 0.9, "avatar importer center-crops portrait images")
+		_expect(image.get_pixel(128, 20).a < 0.1, "avatar importer preserves the full landscape image with transparent padding")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(avatar_path))
+	var invalid := PetInteractions.load_avatar("user://missing.gif")
+	_expect(not bool(invalid.get("ok", true)), "avatar importer reports invalid input without creating a texture")
 
 func _test_gestures() -> void:
 	var gesture := PetGesture.new()
@@ -198,7 +247,17 @@ func _test_audio_and_menu() -> void:
 	_expect(preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_ALWAYS_ON_TOP)), "menu marks always-on-top state")
 	_expect(not preferences_menu.is_item_checked(preferences_menu.get_item_index(PetContextMenu.Command.TOGGLE_SOUND)), "menu marks muted state")
 	_expect(fleet_menu.is_item_disabled(fleet_menu.get_item_index(PetContextMenu.Command.CLEAR_CLONES)), "menu disables empty clone cleanup")
-	_expect(menu.get_item_count() <= 6, "main context menu folds detailed commands under four groups")
+	_expect(menu.get_item_count() <= 7, "main context menu keeps interaction commands grouped")
+	var interaction_menu: PopupMenu = menu.get_node("InteractionMenu")
+	_expect(interaction_menu.theme == menu.theme, "interaction menu shares the established theme")
+	_expect(interaction_menu.get_item_index(PetContextMenu.Command.PICK_AVATAR) >= 0, "interaction menu exposes avatar selection")
+	_expect(interaction_menu.get_item_index(PetContextMenu.Command.DRAW_FORTUNE) >= 0, "interaction menu exposes fortune drawing")
+	_expect(interaction_menu.is_item_disabled(interaction_menu.get_item_index(PetContextMenu.Command.FEED_AVATAR)), "feeding stays disabled until an avatar is loaded")
+	menu.refresh_interaction_state(true, true)
+	_expect(not interaction_menu.is_item_disabled(interaction_menu.get_item_index(PetContextMenu.Command.FEED_AVATAR)), "menu enables feeding when an avatar is loaded")
+	_expect(not interaction_menu.is_item_disabled(interaction_menu.get_item_index(PetContextMenu.Command.CLEAR_INTERACTION_RESULT)), "menu enables clearing a displayed result")
+	var result_style := PetTheme.create_result_card_style()
+	_expect(result_style.bg_color == PetTheme.CREAM and result_style.border_color == PetTheme.BODY_DARK, "floating result cards reuse the established color theme")
 	_expect(menu.get_node_or_null("CollisionMenu") == null, "collision strength has no competing independent menu")
 	_expect(menu.volume_menu.is_item_checked(menu.volume_menu.get_item_index(PetContextMenu.VolumeOption.QUARTER)), "volume submenu reflects selected level")
 	_expect(menu.long_press_menu.is_item_checked(menu.long_press_menu.get_item_index(PetContextMenu.LongPressOption.MOVE)), "long press menu marks move mode")
@@ -931,6 +990,8 @@ func _test_frog_hit_region() -> void:
 		_expect(sprite.scale.x > frog.base_image_scale.x, "vertical impact stretches the perpendicular axis")
 	frog.position = Vector2(160, 172)
 	_expect(frog.is_point_on_pet(Vector2(160, 172)), "frog center is clickable")
+	_expect(frog.is_point_on_rear(Vector2(205, 210)), "frog rear has a dedicated avatar-feed hit area")
+	_expect(Geometry2D.is_point_in_polygon(Vector2(205, 210), frog.get_mouse_region()), "avatar-feed hit area stays inside the transparent window's active region")
 	_expect(not frog.is_point_on_pet(Vector2(0, 0)), "transparent area is not clickable")
 	_expect(frog.get_mouse_region().size() >= 12, "mouse passthrough region has a polygon")
 	var full_size_bounds := FrogVisual.content_bounds_for_size(320.0)
@@ -948,6 +1009,21 @@ func _test_frog_hit_region() -> void:
 	frog.set_display_size_scale(1.8)
 	_expect(frog.is_point_on_pet(Vector2(260, 172)), "scaled frog hit region follows its configured display size")
 	_expect(not frog.is_point_on_pet(Vector2(0, 0)), "scaled frog hit region excludes transparent corners")
+	var revealed_kind := [-1]
+	frog.interaction_result_revealed.connect(func(kind: int) -> void: revealed_kind[0] = kind)
+	frog.set_idle_animation_enabled(false)
+	var avatar_texture := ImageTexture.create_from_image(Image.create(8, 8, false, Image.FORMAT_RGBA8))
+	frog.set_pending_avatar(avatar_texture)
+	_expect(frog.has_pending_avatar(), "loaded avatar remains queued until the frog is fed")
+	frog.play_interaction(PetInteractions.create_avatar_result(frog.pending_avatar))
+	_expect(not frog.has_pending_avatar(), "feeding consumes the queued avatar into a result")
+	_expect(frog.interaction_result["kind"] == PetInteractions.Kind.AVATAR, "feeding selects the avatar reaction")
+	frog.play_interaction(PetInteractions.draw_fortune())
+	await create_timer(1.1).timeout
+	_expect(revealed_kind[0] == PetInteractions.Kind.FORTUNE, "fortune result reveals after the character reaction")
+	_expect(frog.interaction_result_visible, "revealed result remains visible after the reaction")
+	frog.clear_interaction_result()
+	_expect(frog.interaction_result.is_empty(), "clearing a result releases its in-memory display state")
 	frog.queue_free()
 	await process_frame
 

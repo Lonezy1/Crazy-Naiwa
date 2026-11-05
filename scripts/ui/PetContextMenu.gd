@@ -31,6 +31,10 @@ enum Command {
 	COLLISION_ENABLED,
 	FLEET_STATUS,
 	FALL_ON_SLOW_RELEASE,
+	PICK_AVATAR,
+	FEED_AVATAR,
+	DRAW_FORTUNE,
+	CLEAR_INTERACTION_RESULT,
 }
 
 enum Setting {
@@ -144,6 +148,16 @@ func refresh_state(
 	_set_disabled(Command.CLEAR_SMALL_PETS, small_pet_count <= 0)
 	_set_text(Command.FLEET_STATUS, "小奶蛙 %d / %d" % [small_pet_count, 100])
 	_set_disabled(Command.FLEET_STATUS, true)
+	_set_disabled(Command.FEED_AVATAR, true)
+	_set_disabled(Command.PICK_AVATAR, true)
+	_set_disabled(Command.DRAW_FORTUNE, true)
+	_set_disabled(Command.CLEAR_INTERACTION_RESULT, true)
+
+func refresh_interaction_state(has_pending_avatar: bool, has_result: bool) -> void:
+	_set_disabled(Command.FEED_AVATAR, not has_pending_avatar)
+	_set_disabled(Command.PICK_AVATAR, fleet_only)
+	_set_disabled(Command.DRAW_FORTUNE, fleet_only)
+	_set_disabled(Command.CLEAR_INTERACTION_RESULT, fleet_only or not has_result)
 
 func _build_items() -> void:
 	if fleet_only:
@@ -156,6 +170,12 @@ func _build_items() -> void:
 	_add_item(behavior_menu, "回到屏幕右下角", Command.MOVE_TO_CORNER)
 	behavior_menu.add_separator()
 	_add_item(behavior_menu, "停止甩飞", Command.STOP_THROW)
+
+	var interaction_menu := _build_group("蛙蛙互动", "InteractionMenu", 8)
+	_add_item(interaction_menu, "选择头像…", Command.PICK_AVATAR)
+	_add_item(interaction_menu, "投喂当前头像", Command.FEED_AVATAR)
+	_add_item(interaction_menu, "抽取今日蛙签", Command.DRAW_FORTUNE)
+	_add_item(interaction_menu, "清除展示结果", Command.CLEAR_INTERACTION_RESULT)
 
 	_build_throw_menu()
 

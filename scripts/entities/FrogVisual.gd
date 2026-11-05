@@ -3,9 +3,13 @@ extends Node2D
 const PetTheme = preload("res://scripts/ui/PetTheme.gd")
 const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetImpact = preload("res://scripts/core/PetImpact.gd")
+const PetInteractions = preload("res://scripts/core/PetInteractions.gd")
 const BASE_SIZE := 320.0
 const BASE_IMAGE_SCALE := Vector2(0.403252, 0.403252)
 const IMPACT_DURATION := 0.26
+const INTERACTION_REVEAL_DELAY := 1.0
+const INTERACTION_ANIMATION_DURATION := 1.35
+const RESULT_CARD_RECT := Rect2(Vector2(-110.0, 28.0), Vector2(220.0, 112.0))
 const GRAB_TEXTURE_PATH := "res://assets/character/drag_hold.png"
 const STAND_TEXTURE: Texture2D = preload("res://assets/character/stand.png")
 
@@ -28,6 +32,13 @@ var grab_texture: Texture2D
 var display_size_scale := 1.0
 var is_dragging := false
 var idle_animation_enabled := true
+var pending_avatar: Texture2D
+var interaction_result: Dictionary = {}
+var interaction_elapsed := 0.0
+var interaction_result_visible := false
+var result_card_style: StyleBoxFlat
+
+signal interaction_result_revealed(kind: int)
 
 func _ready() -> void:
 	base_scale = scale
@@ -37,6 +48,7 @@ func _ready() -> void:
 	image_sprite.scale = BASE_IMAGE_SCALE
 	base_image_scale = image_sprite.scale
 	image_sprite.z_index = -1
+	result_card_style = PetTheme.create_result_card_style()
 
 func _process(delta: float) -> void:
 	if idle_animation_enabled:
@@ -46,15 +58,20 @@ func _process(delta: float) -> void:
 		impact_strength = 0.0
 	corner_flash_seconds = maxf(0.0, corner_flash_seconds - delta)
 	blink_seconds = maxf(0.0, blink_seconds - delta)
+	if not interaction_result.is_empty() and interaction_elapsed < INTERACTION_ANIMATION_DURATION:
+		interaction_elapsed = minf(interaction_elapsed + delta, INTERACTION_ANIMATION_DURATION)
+		if not interaction_result_visible and interaction_elapsed >= INTERACTION_REVEAL_DELAY:
+			interaction_result_visible = true
+			interaction_result_revealed.emit(int(interaction_result["kind"]))
 	queue_redraw()
-	if not idle_animation_enabled and impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and blink_seconds <= 0.0:
+	if not idle_animation_enabled and impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and blink_seconds <= 0.0 and (interaction_result.is_empty() or interaction_elapsed >= INTERACTION_ANIMATION_DURATION):
 		set_process(false)
 
 func set_idle_animation_enabled(enabled: bool) -> void:
 	idle_animation_enabled = enabled
 	if enabled:
 		set_process(true)
-	elif impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and blink_seconds <= 0.0:
+	elif impact_seconds <= 0.0 and corner_flash_seconds <= 0.0 and blink_seconds <= 0.0 and (interaction_result.is_empty() or interaction_elapsed >= INTERACTION_ANIMATION_DURATION):
 		set_process(false)
 	queue_redraw()
 
@@ -99,6 +116,11 @@ func is_point_on_pet(viewport_position: Vector2) -> bool:
 	var normalized := Vector2(point.x / 78.0, point.y / 124.0)
 	return normalized.length_squared() <= 1.0
 
+func is_point_on_rear(viewport_position: Vector2) -> bool:
+	var point := to_local(viewport_position)
+	var normalized := Vector2((point.x - 45.0) / 20.0, (point.y - 38.0) / 24.0)
+	return normalized.length_squared() <= 1.0
+
 func get_mouse_region() -> PackedVector2Array:
 	var window_points := PackedVector2Array()
 	for point in _content_outline():
@@ -136,6 +158,14 @@ static func content_bounds_for_size(size: float) -> Rect2:
 		maximum.y = maxf(maximum.y, transformed.y)
 	return Rect2(minimum, maximum - minimum)
 
+static func result_card_bounds_for_size(size: float) -> Rect2:
+	var display_scale := size / BASE_SIZE
+	var frog_position := Vector2(size * 0.55, size * 0.51)
+	return Rect2(
+		frog_position + RESULT_CARD_RECT.position * display_scale,
+		RESULT_CARD_RECT.size * display_scale
+	)
+
 static func _texture_local_bounds(texture: Texture2D) -> Rect2:
 	var texture_id := texture.get_instance_id()
 	if _texture_bounds_cache.has(texture_id):
@@ -163,6 +193,38 @@ static func _content_outline() -> PackedVector2Array:
 func play_blink() -> void:
 	blink_seconds = 0.18
 	set_process(true)
+	queue_redraw()
+
+func has_pending_avatar() -> bool:
+	return is_instance_valid(pending_avatar)
+
+func set_pending_avatar(texture: Texture2D) -> void:
+	pending_avatar = texture
+	interaction_result = {
+		"kind": PetInteractions.Kind.AVATAR,
+		"title": "头像已就位",
+		"badge": "点后背投喂",
+		"line_1": "奶蛙正在观察",
+		"line_2": "准备好再点我",
+		"avatar_texture": texture,
+	}
+	interaction_elapsed = INTERACTION_ANIMATION_DURATION
+	interaction_result_visible = true
+	queue_redraw()
+
+func play_interaction(result: Dictionary) -> void:
+	pending_avatar = null
+	interaction_result = result.duplicate()
+	interaction_elapsed = 0.0
+	interaction_result_visible = false
+	set_process(true)
+	queue_redraw()
+
+func clear_interaction_result() -> void:
+	pending_avatar = null
+	interaction_result.clear()
+	interaction_elapsed = 0.0
+	interaction_result_visible = false
 	queue_redraw()
 
 func _draw() -> void:
@@ -195,6 +257,10 @@ func _draw() -> void:
 		var normal_y := absf(impact_normal.y)
 		scale_x *= 1.0 - compression * normal_x + compression * 0.42 * normal_y
 		scale_y *= 1.0 - compression * normal_y + compression * 0.42 * normal_x
+	var interaction_deformation := _interaction_deformation()
+	scale_x *= float(interaction_deformation["scale_x"])
+	scale_y *= float(interaction_deformation["scale_y"])
+	tilt += float(interaction_deformation["tilt"])
 	image_sprite.scale = base_image_scale * Vector2(scale_x, scale_y)
 	image_sprite.rotation = tilt
 	var draw_transform := Transform2D(tilt, Vector2(scale_x, scale_y), 0.0, Vector2.ZERO)
@@ -203,6 +269,62 @@ func _draw() -> void:
 	if corner_flash_seconds > 0.0:
 		_draw_corner_burst()
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	if not interaction_result.is_empty():
+		if interaction_result_visible:
+			_draw_interaction_result()
+		elif interaction_elapsed < INTERACTION_REVEAL_DELAY:
+			_draw_interaction_sparkles()
+
+func _interaction_deformation() -> Dictionary:
+	var neutral := {"scale_x": 1.0, "scale_y": 1.0, "tilt": 0.0}
+	if interaction_result.is_empty() or interaction_elapsed >= INTERACTION_ANIMATION_DURATION:
+		return neutral
+	if int(interaction_result["kind"]) == PetInteractions.Kind.AVATAR:
+		if interaction_elapsed < 0.42:
+			var peek := sin(interaction_elapsed / 0.42 * PI)
+			return {"scale_x": 1.0 + peek * 0.035, "scale_y": 1.0 - peek * 0.045, "tilt": -peek * 0.055}
+		if interaction_elapsed < 0.78:
+			var gulp := sin((interaction_elapsed - 0.42) / 0.36 * PI)
+			return {"scale_x": 1.0 + gulp * 0.065, "scale_y": 1.0 + gulp * 0.11, "tilt": gulp * 0.035}
+		var reveal := clampf((interaction_elapsed - 0.78) / 0.57, 0.0, 1.0)
+		var pop := sin(reveal * PI)
+		return {"scale_x": 1.0 + pop * 0.1, "scale_y": 1.0 - pop * 0.08, "tilt": pop * 0.045}
+	var suspense := clampf(interaction_elapsed / 0.9, 0.0, 1.0)
+	var wobble := sin(interaction_elapsed * 42.0) * suspense * (1.0 - suspense * 0.4)
+	var pop := sin(clampf((interaction_elapsed - 0.82) / 0.53, 0.0, 1.0) * PI)
+	return {"scale_x": 1.0 + pop * 0.08, "scale_y": 1.0 - pop * 0.06, "tilt": wobble * 0.1}
+
+func _draw_interaction_sparkles() -> void:
+	var progress := clampf(interaction_elapsed / INTERACTION_REVEAL_DELAY, 0.0, 1.0)
+	var sparkle_alpha := sin(progress * PI)
+	for index in range(3):
+		var offset := Vector2(43.0 + index * 9.0, -10.0 - index * 13.0)
+		draw_circle(offset, 3.0 + sparkle_alpha * 2.0, Color(PetTheme.BODY.r, PetTheme.BODY.g, PetTheme.BODY.b, sparkle_alpha))
+		draw_line(offset + Vector2(-5, 0), offset + Vector2(5, 0), PetTheme.CREAM, 2.0, true)
+		draw_line(offset + Vector2(0, -5), offset + Vector2(0, 5), PetTheme.CREAM, 2.0, true)
+
+func _draw_interaction_result() -> void:
+	draw_style_box(result_card_style, RESULT_CARD_RECT)
+	var image_rect := Rect2(RESULT_CARD_RECT.position + Vector2(12, 34), Vector2(64, 64))
+	var avatar_texture := interaction_result.get("avatar_texture") as Texture2D
+	if avatar_texture:
+		draw_texture_rect(avatar_texture, image_rect, false)
+	else:
+		draw_circle(image_rect.get_center(), 28.0, PetTheme.HOVER)
+		_draw_luck_spark(image_rect.get_center(), 18.0)
+	draw_rect(image_rect, PetTheme.BODY_DARK, false, 2.0)
+	var text_origin := RESULT_CARD_RECT.position
+	var font := ThemeDB.fallback_font
+	draw_string(font, text_origin + Vector2(88, 30), str(interaction_result.get("title", "蛙蛙互动")), HORIZONTAL_ALIGNMENT_LEFT, 118, 13, PetTheme.BODY_DARK)
+	draw_string(font, text_origin + Vector2(88, 53), str(interaction_result.get("badge", "")), HORIZONTAL_ALIGNMENT_LEFT, 118, 15, PetTheme.INK)
+	draw_string(font, text_origin + Vector2(88, 77), str(interaction_result.get("line_1", "")), HORIZONTAL_ALIGNMENT_LEFT, 118, 12, PetTheme.INK)
+	draw_string(font, text_origin + Vector2(88, 96), str(interaction_result.get("line_2", "")), HORIZONTAL_ALIGNMENT_LEFT, 118, 12, PetTheme.INK)
+
+func _draw_luck_spark(center: Vector2, radius: float) -> void:
+	draw_line(center + Vector2(-radius, 0), center + Vector2(radius, 0), PetTheme.BODY_DARK, 2.5, true)
+	draw_line(center + Vector2(0, -radius), center + Vector2(0, radius), PetTheme.BODY_DARK, 2.5, true)
+	draw_line(center + Vector2(-radius * 0.7, -radius * 0.7), center + Vector2(radius * 0.7, radius * 0.7), PetTheme.BODY_DARK, 2.0, true)
+	draw_line(center + Vector2(-radius * 0.7, radius * 0.7), center + Vector2(radius * 0.7, -radius * 0.7), PetTheme.BODY_DARK, 2.0, true)
 
 func _draw_frog() -> void:
 	if blink_seconds > 0.0:

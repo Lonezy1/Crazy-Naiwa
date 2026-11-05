@@ -5,6 +5,7 @@ const PetBehavior = preload("res://scripts/core/PetBehavior.gd")
 const PetImpact = preload("res://scripts/core/PetImpact.gd")
 const PetGesture = preload("res://scripts/input/PetGesture.gd")
 const PetSettingsStore = preload("res://scripts/core/PetSettings.gd")
+const PetInteractions = preload("res://scripts/core/PetInteractions.gd")
 const PetContextMenu = preload("res://scripts/ui/PetContextMenu.gd")
 const PetAudio = preload("res://scripts/audio/PetAudio.gd")
 const PetFleet = preload("res://scripts/entities/PetFleet.gd")
@@ -18,8 +19,11 @@ var menu: PetContextMenu
 var audio: PetAudio
 var fleet: Node
 var settings: Node
+var avatar_dialog: FileDialog
+var interaction_notice: AcceptDialog
 var pointer_held := false
 var dragging := false
+var avatar_feed_press := false
 var drag_offset := Vector2.ZERO
 var last_drag_pointer_position := Vector2.ZERO
 
@@ -51,6 +55,9 @@ func _ready() -> void:
 	fleet.activity_changed.connect(_on_fleet_activity_changed)
 	fleet.fleet_changed.connect(_refresh_menu_state)
 	_build_menu()
+	_build_interaction_dialogs()
+	pet_window.files_dropped.connect(_on_files_dropped)
+	frog.interaction_result_revealed.connect(_on_interaction_result_revealed)
 	call_deferred("_restore_small_pets")
 	if not fleet.is_active():
 		_apply_behavior_visuals()
@@ -90,12 +97,16 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			_refresh_menu_state()
-			menu.position = DisplayServer.mouse_get_position()
-			menu.popup()
+			if frog.has_pending_avatar() and frog.is_point_on_rear(event.position):
+				_feed_pending_avatar()
+			else:
+				_refresh_menu_state()
+				menu.position = DisplayServer.mouse_get_position()
+				menu.popup()
 			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed and frog.is_point_on_pet(event.position):
+				avatar_feed_press = not fleet.is_active() and frog.has_pending_avatar() and frog.is_point_on_rear(event.position)
 				if fleet.is_active():
 					fleet.pointer_press(0, DisplayServer.mouse_get_position())
 					get_viewport().set_input_as_handled()
@@ -108,6 +119,7 @@ func _input(event: InputEvent) -> void:
 				swarm.kick_near(event.position, Vector2(0.0, -120.0))
 			elif not event.pressed and fleet.has_active_pointer():
 				fleet.pointer_release(DisplayServer.mouse_get_position())
+				avatar_feed_press = false
 				get_viewport().set_input_as_handled()
 			elif not event.pressed and pointer_held:
 				var release_result := gesture.end(Vector2(DisplayServer.mouse_get_position()))
@@ -131,7 +143,9 @@ func _input(event: InputEvent) -> void:
 						"throw": audio.play_effect(PetAudio.Effect.THROW)
 						_: audio.play_effect(PetAudio.Effect.DRAG_RELEASE)
 				else:
-					if behavior.tap():
+					if avatar_feed_press:
+						_feed_pending_avatar()
+					elif behavior.tap():
 						frog.play_impact(Vector2.DOWN, 1250.0)
 						audio.play_effect(PetAudio.Effect.LAND)
 					else:
@@ -142,6 +156,7 @@ func _input(event: InputEvent) -> void:
 					_save_settings()
 				_update_mouse_region()
 				dragging = false
+				avatar_feed_press = false
 				last_drag_pointer_position = Vector2.ZERO
 				get_viewport().set_input_as_handled()
 func _build_menu() -> void:
@@ -197,11 +212,67 @@ func _on_menu_pressed(id: int) -> void:
 		PetContextMenu.Command.STOP_THROW:
 			if behavior.stop_throw():
 				audio.play_effect(PetAudio.Effect.DRAG_RELEASE)
+		PetContextMenu.Command.PICK_AVATAR:
+			avatar_dialog.popup_centered(Vector2i(760, 560))
+		PetContextMenu.Command.FEED_AVATAR:
+			_feed_pending_avatar()
+		PetContextMenu.Command.DRAW_FORTUNE:
+			frog.play_interaction(PetInteractions.draw_fortune())
+		PetContextMenu.Command.CLEAR_INTERACTION_RESULT:
+			frog.clear_interaction_result()
 		PetContextMenu.Command.QUIT:
 			_save_settings()
 			get_tree().quit()
 	_apply_behavior_visuals()
 	_refresh_menu_state()
+
+func _build_interaction_dialogs() -> void:
+	avatar_dialog = FileDialog.new()
+	avatar_dialog.title = "选择一张头像"
+	avatar_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	avatar_dialog.access = FileDialog.ACCESS_FILESYSTEM
+	avatar_dialog.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp, *.bmp ; 图片文件"])
+	avatar_dialog.theme = menu.theme
+	avatar_dialog.file_selected.connect(_on_avatar_file_selected)
+	add_child(avatar_dialog)
+
+	interaction_notice = AcceptDialog.new()
+	interaction_notice.title = "奶蛙没吃下这张图"
+	interaction_notice.theme = menu.theme
+	add_child(interaction_notice)
+
+func _on_files_dropped(files: PackedStringArray) -> void:
+	for path in files:
+		if PetInteractions.supports_image_path(path):
+			_load_avatar(path)
+			return
+	_show_interaction_notice("请拖入 PNG、JPG、WebP 或 BMP 图片。")
+
+func _on_avatar_file_selected(path: String) -> void:
+	_load_avatar(path)
+
+func _load_avatar(path: String) -> void:
+	var loaded := PetInteractions.load_avatar(path)
+	if not bool(loaded.get("ok", false)):
+		_show_interaction_notice(str(loaded.get("error", "图片无法读取，请换一张再试。")))
+		return
+	var texture := ImageTexture.create_from_image(loaded["image"] as Image)
+	frog.set_pending_avatar(texture)
+	_refresh_menu_state()
+
+func _feed_pending_avatar() -> void:
+	if not frog.has_pending_avatar():
+		return
+	frog.play_interaction(PetInteractions.create_avatar_result(frog.pending_avatar))
+	audio.play_effect(PetAudio.Effect.FEED)
+	_refresh_menu_state()
+
+func _show_interaction_notice(message: String) -> void:
+	interaction_notice.dialog_text = message
+	interaction_notice.popup_centered()
+
+func _on_interaction_result_revealed(_kind: int) -> void:
+	audio.play_effect(PetAudio.Effect.REVEAL)
 
 func _on_menu_setting_selected(setting: int, enabled: bool) -> void:
 	match setting:
@@ -428,3 +499,7 @@ func _refresh_menu_state() -> void:
 	if not menu:
 		return
 	fleet.refresh_menu(menu, swarm.get_clone_count(), behavior.fling_active)
+	menu.refresh_interaction_state(
+		frog.has_pending_avatar(),
+		not frog.interaction_result.is_empty()
+	)
